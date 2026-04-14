@@ -1,20 +1,42 @@
 use bytes::Bytes;
 use futures_util::SinkExt;
 use tokio::net::TcpStream;
+use tokio::sync::oneshot;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::FrameSender;
 
 pub async fn run(addr: &str, tx: FrameSender) {
+    let (_shutdown_tx, shutdown_rx) = oneshot::channel();
+    run_until_shutdown(addr, tx, shutdown_rx).await;
+}
+
+pub async fn run_until_shutdown(addr: &str, tx: FrameSender, mut shutdown_rx: oneshot::Receiver<()>) {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind");
     println!("WebSocket Server: ws://{}", addr);
 
-    while let Ok((stream, _)) = listener.accept().await {
-        let tx = tx.clone();
-        tokio::spawn(handle_connection(stream, tx));
+    loop {
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                println!("WebSocket server shutdown signal received.");
+                break;
+            }
+            incoming = listener.accept() => {
+                match incoming {
+                    Ok((stream, _)) => {
+                        let tx = tx.clone();
+                        tokio::spawn(handle_connection(stream, tx));
+                    }
+                    Err(err) => {
+                        println!("Accept failed: {}", err);
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 

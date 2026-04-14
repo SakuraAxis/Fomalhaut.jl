@@ -3,6 +3,10 @@ name = "fomalhaut_rs"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+# Build a C-compatible dynamic library for Julia `ccall`
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 bytes = "1.11.1"
 futures-util = "0.3.32"
