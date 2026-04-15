@@ -8,7 +8,7 @@ pub mod transport;
 
 pub type Frame = Arc<Vec<u8>>;
 pub type FrameSender = broadcast::Sender<Frame>;
-pub use ffi::{fmh_ws_send, fmh_ws_start, fmh_ws_stop, process_wave_data};
+pub use ffi::{fmh_ws_send, fmh_ws_start, fmh_ws_stop};
 
 #[cfg(test)]
 mod tests {

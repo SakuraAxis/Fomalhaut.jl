@@ -3,7 +3,7 @@ module Fomalhaut
 using Libdl
 include("AsciiArt.jl")
 
-export start_server, send_frame!, stop_server!, process_wave!
+export start_server, send_frame!, stop_server!
 export CONTENT_TYPE_FLOAT32_TENSOR, CONTENT_TYPE_JSON, CONTENT_TYPE_RGBA_FRAME
 
 greet() = print("Hello World!")
@@ -167,23 +167,7 @@ function stop_server!()
     return nothing
 end
 
-"""
-process_wave!(data::Vector{Float32})
 
-Call Rust FFI to process wave data in-place.
-"""
-function process_wave!(data::Vector{Float32})
-    status = ccall(
-        (:process_wave_data, _load_rust_lib()),
-        Cint,
-        (Ptr{Float32}, Csize_t),
-        data,
-        length(data),
-    )
-
-    status == _ffi_ok || error("Rust FFI call failed with status code $(status).")
-    return data
-end
 
 # Called when the module is loaded; display brand ASCII art in terminal sessions
 function __init__()
