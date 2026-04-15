@@ -1,3 +1,7 @@
+module AsciiArt
+
+export print_fomalhaut_ascii_art
+
 # ASCII art lines for Fomalhaut branding.
 const ASCII_LINES = [
     "::::::::::::::     ::::    :::    :::       :::    ::::::    :::::::::::::: ",
@@ -33,3 +37,5 @@ function print_fomalhaut_ascii_art(io::IO=stdout)
     end
     return nothing
 end
+
+end # module AsciiArt

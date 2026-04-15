@@ -1,7 +1,7 @@
 module Fomalhaut
 
 using Libdl
-include("ascii_art_fomalhaut.jl")
+include("AsciiArt.jl")
 
 export start_server, send_frame!, stop_server!, process_wave!
 export CONTENT_TYPE_FLOAT32_TENSOR, CONTENT_TYPE_JSON, CONTENT_TYPE_RGBA_FRAME
@@ -188,7 +188,7 @@ end
 # Called when the module is loaded; display brand ASCII art in terminal sessions
 function __init__()
     try
-        print_fomalhaut_ascii_art()
+        AsciiArt.print_fomalhaut_ascii_art()
     catch err
         # Branding output must never break package initialization
         @warn "Failed to show Fomalhaut ASCII art." exception = (err, catch_backtrace())
