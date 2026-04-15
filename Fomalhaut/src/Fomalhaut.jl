@@ -3,10 +3,10 @@ module Fomalhaut
 using Libdl
 include("AsciiArt.jl")
 
-export start_server, send_frame!, stop_server!
+export start_server, send_frame!, stop_server!, serve
 export CONTENT_TYPE_FLOAT32_TENSOR, CONTENT_TYPE_JSON, CONTENT_TYPE_RGBA_FRAME
 
-export @stream
+export @websocket
 
 const _streams = []
 
@@ -104,7 +104,7 @@ function _build_envelope_v1(
     return frame
 end
 
-macro stream(path, f)
+macro websocket(path, f)
     return esc(quote
         push!(Fomalhaut._streams, $f)
     end)
@@ -229,8 +229,8 @@ function run(callback; fps::Real=30, host="127.0.0.1", port::Integer=8080)
     end
 end
 
-function start(; fps=30, host="127.0.0.1", port=8080)
-    length(_streams) > 0 || error("No streams registered.")
+function serve(; fps=30, host="127.0.0.1", port=8080)
+    length(_streams) > 0 || error("No WebSocket routes registered. Use @websocket.")
 
     run(fps=fps, host=host, port=port) do ctx
         _streams[1](ctx)
