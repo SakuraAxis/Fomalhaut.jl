@@ -18,7 +18,7 @@ pub extern "C" fn fmh_ws_start(addr_ptr: *const u8, addr_len: usize) -> i32 {
             return FFI_ERR_NULL_PTR;
         }
 
-        // SAFETY : null pointer is checked above; caller owns address bytes for this call
+        // SAFETY : validated above
         let addr_bytes = unsafe { std::slice::from_raw_parts(addr_ptr, addr_len) };
         let addr = match std::str::from_utf8(addr_bytes) {
             Ok(v) => v.to_string(),
@@ -29,16 +29,28 @@ pub extern "C" fn fmh_ws_start(addr_ptr: *const u8, addr_len: usize) -> i32 {
             Ok(g) => g,
             Err(_) => return FFI_ERR_RUNTIME,
         };
+
         if guard.worker.is_some() {
             return FFI_ERR_ALREADY_RUNNING;
         }
 
-        let (frame_tx, _) = broadcast::channel::<Frame>(256);
+        // Increase buffer（ allow burst ）
+        let (frame_tx, _) = broadcast::channel::<Frame>(1024);
+
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
         let worker_addr = addr.clone();
         let worker_tx = frame_tx.clone();
+
         let worker = std::thread::spawn(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread()
+            // Threads are automatically configured based on the CPU
+            let threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(2)
+                .max(2);
+
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(threads)
                 .enable_all()
                 .build()
             {
@@ -48,15 +60,21 @@ pub extern "C" fn fmh_ws_start(addr_ptr: *const u8, addr_len: usize) -> i32 {
                     return;
                 }
             };
+
             rt.block_on(async move {
-                transport::websocket_server::run_until_shutdown(&worker_addr, worker_tx, shutdown_rx)
-                    .await;
+                transport::websocket_server::run_until_shutdown(
+                    &worker_addr,
+                    worker_tx,
+                    shutdown_rx,
+                )
+                .await;
             });
         });
 
         guard.frame_tx = Some(frame_tx);
         guard.shutdown_tx = Some(shutdown_tx);
         guard.worker = Some(worker);
+
         FFI_OK
     });
 
@@ -73,22 +91,33 @@ pub extern "C" fn fmh_ws_send(frame_ptr: *const u8, frame_len: usize) -> i32 {
         if frame_ptr.is_null() {
             return FFI_ERR_NULL_PTR;
         }
-        // SAFETY : null pointer is checked above; caller owns frame bytes for this call
+
+        // SAFETY : validated above
         let frame = unsafe { std::slice::from_raw_parts(frame_ptr, frame_len) };
+
         if !validate_envelope(frame) {
             return FFI_ERR_INVALID_FRAME;
         }
 
-        let guard = match state().lock() {
-            Ok(g) => g,
-            Err(_) => return FFI_ERR_RUNTIME,
-        };
-        let Some(tx) = guard.frame_tx.as_ref() else {
-            return FFI_ERR_NOT_RUNNING;
+        // Shorten the lock range ( to avoid contention )
+        let tx = {
+            let guard = match state().lock() {
+                Ok(g) => g,
+                Err(_) => return FFI_ERR_RUNTIME,
+            };
+
+            match guard.frame_tx.as_ref() {
+                Some(tx) => tx.clone(),
+                None => return FFI_ERR_NOT_RUNNING,
+            }
         };
 
-        // No receivers is not an error for producer-facing API
-        let _ = tx.send(Arc::new(frame.to_vec()));
+        // One allocation, then Arc clone
+        let frame_arc = Arc::new(frame.to_vec());
+
+        // Send ( no-receiver allowed )
+        let _ = tx.send(frame_arc);
+
         FFI_OK
     });
 
@@ -106,18 +135,23 @@ pub extern "C" fn fmh_ws_stop() -> i32 {
             Ok(g) => g,
             Err(_) => return FFI_ERR_RUNTIME,
         };
+
         if guard.worker.is_none() {
             return FFI_ERR_NOT_RUNNING;
         }
 
+        // send shutdown signal
         if let Some(tx) = guard.shutdown_tx.take() {
             let _ = tx.send(());
         }
 
+        // Waiting for worker to finish
         if let Some(worker) = guard.worker.take() {
             let _ = worker.join();
         }
+
         guard.frame_tx = None;
+
         FFI_OK
     });
 
