@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread::JoinHandle;
 
 use tokio::sync::{broadcast, oneshot};
 
@@ -23,7 +22,6 @@ pub struct ServerState {
     pub http_routes: HashMap<String, HttpRoute>,
     pub ws_routes: HashMap<String, WsSender>,
     pub shutdown_tx: Option<oneshot::Sender<()>>,
-    pub worker: Option<JoinHandle<()>>,
 }
 
 impl ServerState {
@@ -32,7 +30,6 @@ impl ServerState {
             http_routes: HashMap::new(),
             ws_routes: HashMap::new(),
             shutdown_tx: None,
-            worker: None,
         }
     }
 }

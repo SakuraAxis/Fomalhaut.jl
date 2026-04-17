@@ -11,6 +11,7 @@ const _ffi_ok = Cint(0)
 const _server_running = Ref(false)
 const _active_app = Ref{Any}(nothing)
 const _active_app_id = Ref(0)
+const _http_callback_ptr = Ref{Ptr{Cvoid}}(C_NULL)
 
 const ENVELOPE_V1 = UInt8(1)
 const CONTENT_TYPE_FLOAT32_TENSOR = UInt16(1)
@@ -185,10 +186,16 @@ function _malloc_copy(bytes::Vector{UInt8})
         return Ptr{UInt8}(C_NULL), Csize_t(0)
     end
 
-    ptr = Base.Libc.malloc(length(bytes))
-    ptr == C_NULL && error("malloc failed for response buffer")
-    unsafe_copyto!(Ptr{UInt8}(ptr), pointer(bytes), length(bytes))
-    return Ptr{UInt8}(ptr), Csize_t(length(bytes))
+    # Use the Rust library's malloc to ensure heap compatibility on Windows
+    ptr = ccall(
+        (:fmh_malloc, _load_rust_lib()),
+        Ptr{UInt8},
+        (Csize_t,),
+        length(bytes)
+    )
+    ptr == C_NULL && error("malloc failed for response buffer via Rust fmh_malloc")
+    unsafe_copyto!(ptr, pointer(bytes), length(bytes))
+    return ptr, Csize_t(length(bytes))
 end
 
 function _active_app_or_throw()
@@ -215,15 +222,17 @@ function _http_request_trampoline(
         app = _active_app_or_throw()
         method = String(copy(unsafe_wrap(Vector{UInt8}, method_ptr, Int(method_len))))
         path = String(copy(unsafe_wrap(Vector{UInt8}, path_ptr, Int(path_len))))
-        query = String(copy(unsafe_wrap(Vector{UInt8}, query_ptr, Int(query_len))))
+                query = String(copy(unsafe_wrap(Vector{UInt8}, query_ptr, Int(query_len))))
         headers_raw = String(copy(unsafe_wrap(Vector{UInt8}, headers_ptr, Int(headers_len))))
         body = copy(unsafe_wrap(Vector{UInt8}, body_ptr, Int(body_len)))
 
         handler = get(app.http_routes, path, nothing)
-        handler isa Function || return Cint(9)
+        if handler === nothing
+            return Cint(9)
+        end
 
         request = Request(method, path, _parse_headers(headers_raw), query, body)
-        response = handler(request)
+                response = handler(request)
         response isa Tuple && length(response) == 2 || error("POST handler must return (Vector{UInt8}, content_type::String)")
 
         response_body = response[1]
@@ -245,24 +254,29 @@ function _http_request_trampoline(
     end
 end
 
-const _http_callback_ptr = @cfunction(
-    _http_request_trampoline,
-    Cint,
-    (
-        Ptr{Cvoid},
-        Ptr{UInt8},
-        Csize_t,
-        Ptr{UInt8},
-        Csize_t,
-        Ptr{UInt8},
-        Csize_t,
-        Ptr{UInt8},
-        Csize_t,
-        Ptr{UInt8},
-        Csize_t,
-        Ptr{FFIHttpResponse},
-    ),
-)
+function _ensure_http_callback()
+    if _http_callback_ptr[] == C_NULL
+        _http_callback_ptr[] = @cfunction(
+            _http_request_trampoline,
+            Cint,
+            (
+                Ptr{Cvoid},
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{FFIHttpResponse},
+            ),
+        )
+    end
+    return _http_callback_ptr[]
+end
 
 function _register_routes!(app::App)
     for path in keys(app.http_routes)
@@ -273,7 +287,7 @@ function _register_routes!(app::App)
             (Ptr{UInt8}, Csize_t, Ptr{Cvoid}, Ptr{Cvoid}),
             path_bytes,
             length(path_bytes),
-            _http_callback_ptr,
+            _ensure_http_callback(),
             C_NULL,
         )
         _check_ffi_status(status, "register_post $path")
@@ -378,18 +392,30 @@ function serve(app::App; host::AbstractString = "127.0.0.1", port::Integer = 808
     addr = "$(host):$(port)"
     addr_bytes = Vector{UInt8}(codeunits(addr))
     _active_app[] = app
-    push!(app.handler_refs, _http_callback_ptr)
+    push!(app.handler_refs, _ensure_http_callback())
     _register_routes!(app)
 
-    status = ccall(
-        (:fmh_server_start, _load_rust_lib()),
-        Cint,
-        (Ptr{UInt8}, Csize_t),
-        addr_bytes,
-        length(addr_bytes),
-    )
-    _check_ffi_status(status, "serve")
     _server_running[] = true
+    
+    server_task = Threads.@spawn begin
+        try
+            status = ccall(
+                (:fmh_server_start, _load_rust_lib()),
+                Cint,
+                (Ptr{UInt8}, Csize_t),
+                addr_bytes,
+                length(addr_bytes),
+            )
+            if status != 0 && status != 5 # 5 is already stopped
+                 @error "Rust server exited with error" status
+            end
+        catch err
+            @error "Error in Rust server task" exception=(err, catch_backtrace())
+        finally
+            _server_running[] = false
+        end
+    end
+
     _start_ws_tasks!(app; fps = fps)
 
     try

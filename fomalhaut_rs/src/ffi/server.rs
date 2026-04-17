@@ -4,7 +4,7 @@ use tokio::sync::oneshot;
 
 use super::errors::{
     FFI_ERR_ALREADY_RUNNING, FFI_ERR_INVALID_FRAME, FFI_ERR_INVALID_ROUTE, FFI_ERR_INVALID_UTF8,
-    FFI_ERR_NOT_RUNNING, FFI_ERR_NULL_PTR, FFI_ERR_PANIC, FFI_ERR_RUNTIME, FFI_OK,
+    FFI_ERR_NULL_PTR, FFI_ERR_PANIC, FFI_ERR_RUNTIME, FFI_OK,
 };
 use crate::protocol::envelope::validate_envelope;
 use crate::runtime::state::state;
@@ -28,38 +28,31 @@ pub extern "C" fn fmh_server_start(addr_ptr: *const u8, addr_len: usize) -> i32 
             Err(_) => return FFI_ERR_RUNTIME,
         };
 
-        if guard.worker.is_some() {
+        if guard.shutdown_tx.is_some() {
             return FFI_ERR_ALREADY_RUNNING;
         }
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let worker_addr = addr.clone();
 
-        let worker = std::thread::spawn(move || {
-            let threads = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(2)
-                .max(2);
+        guard.shutdown_tx = Some(shutdown_tx);
+        drop(guard); // Release lock before blocking
 
-            let rt = match tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(threads)
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(err) => {
-                    eprintln!("Failed to build tokio runtime: {}", err);
-                    return;
-                }
-            };
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(err) => {
+                eprintln!("Failed to build tokio runtime: {}", err);
+                return FFI_ERR_RUNTIME;
+            }
+        };
 
-            rt.block_on(async move {
-                transport::http_server::run_until_shutdown(&worker_addr, shutdown_rx).await;
-            });
+        rt.block_on(async move {
+            transport::http_server::run_until_shutdown(&worker_addr, shutdown_rx).await;
         });
 
-        guard.shutdown_tx = Some(shutdown_tx);
-        guard.worker = Some(worker);
         FFI_OK
     });
 
@@ -77,16 +70,8 @@ pub extern "C" fn fmh_server_stop() -> i32 {
             Err(_) => return FFI_ERR_RUNTIME,
         };
 
-        if guard.worker.is_none() {
-            return FFI_ERR_NOT_RUNNING;
-        }
-
         if let Some(tx) = guard.shutdown_tx.take() {
             let _ = tx.send(());
-        }
-
-        if let Some(worker) = guard.worker.take() {
-            let _ = worker.join();
         }
 
         guard.http_routes.clear();

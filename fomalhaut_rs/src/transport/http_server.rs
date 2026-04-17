@@ -85,8 +85,12 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
 
         if request.method == "POST" {
             match guard.http_routes.get(&request.path) {
-                Some(route) => RouteResolution::Handler(*route),
-                None => RouteResolution::Immediate(404, "Not Found"),
+                Some(route) => {
+                    RouteResolution::Handler(*route)
+                }
+                None => {
+                    RouteResolution::Immediate(404, "Not Found")
+                }
             }
         } else if guard.http_routes.contains_key(&request.path) {
             RouteResolution::Immediate(405, "Method Not Allowed")
@@ -310,7 +314,7 @@ async fn write_response(
         header.push_str(&format!(
             "Access-Control-Allow-Origin: {}\r\n\
              Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n\
-             Access-Control-Allow-Headers: Content-Type\r\n
+             Access-Control-Allow-Headers: Content-Type\r\n\
              Vary: Origin\r\n",
             o
         ));

@@ -70,3 +70,15 @@ pub extern "C" fn fmh_register_websocket(path_ptr: *const u8, path_len: usize) -
         Err(_) => FFI_ERR_PANIC,
     }
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fmh_malloc(size: usize) -> *mut u8 {
+    unsafe { libc::malloc(size) as *mut u8 }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fmh_free(ptr: *mut u8) {
+    if !ptr.is_null() {
+        unsafe { libc::free(ptr.cast()) };
+    }
+}
