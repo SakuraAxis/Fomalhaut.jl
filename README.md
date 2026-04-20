@@ -43,9 +43,11 @@ Fomalhaut is organized as a Julia API layer + Rust transport core :
 ```julia
 using Fomalhaut
 
-start_server(host = "127.0.0.1", port = 8080)
-send_frame!(UInt8[0x01, 0x02, 0x03]; content_type = CONTENT_TYPE_RGBA_FRAME)
-stop_server!()
+app = App()
+
+@websocket app "/phillips-ocean" wave_stream
+
+Fomalhaut.serve(app; fps=60)
 ```
 
 ## How To Start Backend Server
