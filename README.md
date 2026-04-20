@@ -21,91 +21,59 @@ IMPORTANT : This project is still in the development and testing stages, licensi
 
 Fomalhaut uses Tokio & tokio-tungstenite to build Asynchronous WebSocket. Tokio & tokio-tungstenite licensed under the MIT License.  
 
-## WebSocket Framework ( v0.1 )
+## WIP Project Fomalhaut
 
-Fomalhaut is organized as a Julia API layer + Rust transport core :
-
-- Julia builds frame metadata and payload bytes.
-- Rust manages websocket lifecycle and broadcast delivery.
-- FFI boundary uses a stable `C ABI` with status codes.
-
-### Envelope v1 ( Little Endian )
-
-- `version: u8` ( currently `1` )
-- `content_type: u16` ( `1=float32_tensor`, `2=json`, `3=rgba_frame` )
-- `flags: u16`
-- `timestamp_ns: u64`
-- `payload_len: u32`
-- `payload: [u8; payload_len]`
-
-### Minimal usage from Julia
+### Usage `@websocket`
 
 ```julia
 using Fomalhaut
 
-app = App()
+const RES = 96
+const BUFFER = zeros(Float32, RES, RES)
+const R = range(-3f0, 3f0, length=RES)
+function wave_stream(ctx)
+    t = Float32(ctx.time * 2.0)
+    BUFFER .= sin.(R .+ t) .+ cos.(R' .+ t)
 
-@websocket app "/phillips-ocean" wave_stream
+    return vec(BUFFER)
+end
 
-Fomalhaut.serve(app; fps=60)
+function start_server()
+    app = App()
+    
+    @websocket app "/live-wave" wave_stream
+
+    Fomalhaut.serve(app; fps=60)
+end
+
+start_server()
 ```
 
-## How To Start Backend Server
-
-### 1. Build Rust backend library
-
-From repository root :
-
-```bash
-cd fomalhaut_rs
-cargo build --release
-```
-
-### 2. TEMPORARY : Test With Achernar
-
-copy `/Fomalhaut/` & `/fomalhaut_rs/` folder to `Achernar project root`
-
-### 3. Stop backend server
+### Usage `@post`
 
 ```julia
-stop_server!()
+using Fomalhaut
+
+function check(req::Fomalhaut.Request)
+    response_text = "Fomalhaut Server is running!\n" *
+                    "Time: $(round(time(); digits=2))\n" *
+                    "Method: $(req.method)\n" *
+                    "Path: $(req.path)\n" *
+                    "Query: $(req.query)\n"
+
+    return (Vector{UInt8}(codeunits(response_text)), "text/plain")
+end
+
+function start_server()
+    app = App()
+    
+    @post app "/check-test" check
+
+    Fomalhaut.serve(app)
+end
+
+start_server()
 ```
-
-## Migration Note ( Old IPC Server )
-
-The previous IPC bridge pattern ( `Sockets.listen` on named pipe / unix domain socket and Rust `ipc_reader` ) is now removed from the default architecture.
-
-- Old flow : `Julia IPC socket -> Rust ipc_reader -> websocket`
-- Current flow : `Julia ccall -> Rust fmh_ws_send -> websocket`
-
-This makes payload shape dynamic and removes fixed frame-size assumptions.
-
-## Temporary Copy To Another Project
-
-If you temporarily copy Fomalhaut into another Julia project and want `using Fomalhaut` to work immediately, copy both folders:
-
-- `Fomalhaut/`
-- `fomalhaut_rs/`
-
-Reason: `Fomalhaut/src/Fomalhaut.jl` looks for the Rust dynamic library under :
-
-- `fomalhaut_rs/target/release/`
-- `fomalhaut_rs/target/debug/`
-
-### Do Rust build artifacts need to be copied?
-
-Yes. The compiled Rust dynamic library must exist on the target side :
-
-- Windows : `fomalhaut_rs.dll`
-- Linux : `libfomalhaut_rs.so`
-- macOS : `libfomalhaut_rs.dylib`
-
-You can either :
-
-- copy `fomalhaut_rs/target/release/` together, or
-- copy source and run `cargo build --release` again in the other project.
-
-If only `Fomalhaut/` is copied without Rust build output, `using Fomalhaut` can still load, but `start_server` and `send_frame!` will fail when trying to load the dynamic library.
 
 ## Project Dependencies Details
 
