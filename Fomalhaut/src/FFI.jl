@@ -1,0 +1,190 @@
+function _rust_lib_filename()
+    if Sys.iswindows()
+        return "fomalhaut_rs.dll"
+    elseif Sys.isapple()
+        return "libfomalhaut_rs.dylib"
+    else
+        return "libfomalhaut_rs.so"
+    end
+end
+
+function _rust_lib_candidates()
+    file = _rust_lib_filename()
+    return (
+        joinpath(@__DIR__, "..", "..", "fomalhaut_rs", "target", "release", file),
+        joinpath(@__DIR__, "..", "..", "fomalhaut_rs", "target", "debug", file),
+    )
+end
+
+function _load_rust_lib()
+    if _rust_lib_path[] !== nothing
+        return _rust_lib_path[]::String
+    end
+
+    for path in _rust_lib_candidates()
+        if isfile(path)
+            _rust_lib_path[] = path
+            return path
+        end
+    end
+
+    error("Could not find Rust dynamic library. Build fomalhaut_rs first ( cargo build --release ).")
+end
+
+function _ffi_error_message(code::Integer)
+    if code == 0
+        return "ok"
+    elseif code == 1
+        return "null pointer"
+    elseif code == 2
+        return "panic caught in Rust"
+    elseif code == 3
+        return "invalid UTF-8 input"
+    elseif code == 4
+        return "server already running"
+    elseif code == 5
+        return "server not running"
+    elseif code == 6
+        return "runtime internal error"
+    elseif code == 7
+        return "invalid envelope frame"
+    elseif code == 8
+        return "invalid route"
+    elseif code == 9
+        return "callback failed"
+    else
+        return "unknown error"
+    end
+end
+
+function _check_ffi_status(status::Integer, context::AbstractString)
+    status == _ffi_ok && return
+    msg = _ffi_error_message(status)
+    error("$(context) failed with status $(status): $(msg)")
+end
+
+function _parse_headers(headers_raw::String)
+    headers = Dict{String, String}()
+    isempty(headers_raw) && return headers
+
+    for line in split(headers_raw, "\r\n"; keepempty=false)
+        parts = split(line, ":"; limit=2)
+        length(parts) == 2 || continue
+        headers[strip(parts[1])] = strip(parts[2])
+    end
+
+    return headers
+end
+
+function _malloc_copy(bytes::Vector{UInt8})
+    if isempty(bytes)
+        return Ptr{UInt8}(C_NULL), Csize_t(0)
+    end
+
+    # Use the Rust library's malloc to ensure heap compatibility on Windows
+    ptr = ccall(
+        (:fmh_malloc, _load_rust_lib()),
+        Ptr{UInt8},
+        (Csize_t,),
+        length(bytes)
+    )
+    ptr == C_NULL && error("malloc failed for response buffer via Rust fmh_malloc")
+    unsafe_copyto!(ptr, pointer(bytes), length(bytes))
+    return ptr, Csize_t(length(bytes))
+end
+
+function _active_app_or_throw()
+    app = _active_app[]
+    app isa App || error("No active Fomalhaut app registered")
+    return app::App
+end
+
+function _http_request_trampoline(
+    userdata::Ptr{Cvoid},
+    method_ptr::Ptr{UInt8},
+    method_len::Csize_t,
+    path_ptr::Ptr{UInt8},
+    path_len::Csize_t,
+    query_ptr::Ptr{UInt8},
+    query_len::Csize_t,
+    headers_ptr::Ptr{UInt8},
+    headers_len::Csize_t,
+    body_ptr::Ptr{UInt8},
+    body_len::Csize_t,
+    response_out::Ptr{FFIHttpResponse},
+)::Cint
+    try
+        app = _active_app_or_throw()
+        method = String(copy(unsafe_wrap(Vector{UInt8}, method_ptr, Int(method_len))))
+        path = String(copy(unsafe_wrap(Vector{UInt8}, path_ptr, Int(path_len))))
+        query = String(copy(unsafe_wrap(Vector{UInt8}, query_ptr, Int(query_len))))
+        headers_raw = String(copy(unsafe_wrap(Vector{UInt8}, headers_ptr, Int(headers_len))))
+        body = copy(unsafe_wrap(Vector{UInt8}, body_ptr, Int(body_len)))
+
+        handler = get(app.http_routes, (method, path), nothing)
+        if handler === nothing
+            return Cint(9)
+        end
+
+        request = Request(method, path, _parse_headers(headers_raw), query, body)
+
+        handler_result = handler(request)
+        
+        res_body = UInt8[]
+        res_ct = "text/plain"
+        res_status = UInt16(200)
+
+        if handler_result isa Tuple
+            if length(handler_result) >= 2
+                res_body = handler_result[1]
+                res_ct = handler_result[2]
+                if length(handler_result) >= 3
+                    res_status = handler_result[3]
+                end
+            end
+        else
+            res_body = handler_result
+        end
+
+        # Force deep copy and convert to Vector{UInt8}
+        final_body = Vector{UInt8}(copy(res_body))
+        
+        body_ptr_out, body_len_out = _malloc_copy(final_body)
+        ct_bytes = Vector{UInt8}(codeunits(String(res_ct)))
+        ct_ptr_out, ct_len_out = _malloc_copy(ct_bytes)
+
+
+        unsafe_store!(
+            response_out,
+            FFIHttpResponse(body_ptr_out, body_len_out, ct_ptr_out, ct_len_out, UInt16(res_status)),
+        )
+        return Cint(0)
+    catch err
+        @error "Fomalhaut HTTP handler failed" exception=(err, catch_backtrace())
+        return Cint(9)
+    end
+end
+
+function _ensure_http_callback()
+    if _http_callback_ptr[] == C_NULL
+        _http_callback_ptr[] = @cfunction(
+            _http_request_trampoline,
+            Cint,
+            (
+                Ptr{Cvoid},
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{UInt8},
+                Csize_t,
+                Ptr{FFIHttpResponse},
+            ),
+        )
+    end
+    return _http_callback_ptr[]
+end
