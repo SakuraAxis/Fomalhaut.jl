@@ -20,7 +20,7 @@ IMPORTANT : This project is still in the development and testing stages, licensi
 
 **[ for Dependencies Details please see the end of this README ]**
 
-Fomalhaut uses Tokio & tokio-tungstenite to build Asynchronous WebSocket. Tokio & tokio-tungstenite licensed under the MIT License.
+Fomalhaut uses Tokio & tokio-tungstenite to build Asynchronous WebSocket & full support for RESTful operations. Tokio & tokio-tungstenite licensed under the MIT License.
 
 Fomalhaut provides first-class support for SakuraEngine.jl - the Template Engine for Julia.
 
