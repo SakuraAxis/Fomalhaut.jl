@@ -23,7 +23,7 @@ Fomalhaut uses Tokio & tokio-tungstenite to build Asynchronous WebSocket. Tokio 
 
 ## WIP Project Fomalhaut
 
-### `WebSocket` Registrations
+### **WebSocket** Registrations
 
 run below to test @FMHUT.websocket
 
@@ -52,7 +52,7 @@ app = FMHUT.App()
 FMHUT.serve(app; port=8080, fps=60)
 ```
 
-### `POST` Registrations
+### **POST** Registrations
 
 run below to test `@FMHUT.post`
 
