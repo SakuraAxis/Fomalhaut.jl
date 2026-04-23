@@ -19,7 +19,7 @@ unsafe impl Send for HttpRoute {}
 unsafe impl Sync for HttpRoute {}
 
 pub struct ServerState {
-    pub http_routes: HashMap<String, HttpRoute>,
+    pub http_routes: HashMap<(String, String), HttpRoute>,
     pub ws_routes: HashMap<String, WsSender>,
     pub shutdown_tx: Option<oneshot::Sender<()>>,
 }

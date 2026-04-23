@@ -3,7 +3,7 @@ module Fomalhaut
 using Libdl
 include("AsciiArt.jl")
 
-export App, Request, WebSocketContext, serve, stop_server!, @post, @websocket
+export App, Request, WebSocketContext, serve, stop_server!, @post, @options, @websocket
 export CONTENT_TYPE_FLOAT32_TENSOR, CONTENT_TYPE_JSON, CONTENT_TYPE_RGBA_FRAME
 
 const _rust_lib_path = Ref{Union{Nothing, String}}(nothing)
@@ -34,7 +34,7 @@ struct WebSocketContext
 end
 
 mutable struct App
-    http_routes::Dict{String, Function}
+    http_routes::Dict{Tuple{String, String}, Function}
     ws_routes::Dict{String, Function}
     handler_refs::Vector{Any}
     ws_tasks::Vector{Task}
@@ -43,7 +43,7 @@ end
 
 function App()
     _active_app_id[] += 1
-    return App(Dict{String, Function}(), Dict{String, Function}(), Any[], Task[], _active_app_id[])
+    return App(Dict{Tuple{String, String}, Function}(), Dict{String, Function}(), Any[], Task[], _active_app_id[])
 end
 
 Base.show(io::IO, app::App) = print(io, "Fomalhaut.App(http=$(length(app.http_routes)), ws=$(length(app.ws_routes)))")
@@ -127,9 +127,18 @@ function _validate_path(path::AbstractString)
     return path
 end
 
-function register_post!(app::App, path::AbstractString, handler::Function)
-    app.http_routes[String(_validate_path(path))] = handler
+function register_http!(app::App, method::AbstractString, path::AbstractString, handler::Function)
+    normalized_method = uppercase(String(method))
+    app.http_routes[(normalized_method, String(_validate_path(path)))] = handler
     return app
+end
+
+function register_post!(app::App, path::AbstractString, handler::Function)
+    return register_http!(app, "POST", path, handler)
+end
+
+function register_options!(app::App, path::AbstractString, handler::Function)
+    return register_http!(app, "OPTIONS", path, handler)
 end
 
 function register_websocket!(app::App, path::AbstractString, handler::Function)
@@ -140,6 +149,12 @@ end
 macro post(app, path, f)
     return esc(quote
         $(@__MODULE__).register_post!($app, $path, $f)
+    end)
+end
+
+macro options(app, path, f)
+    return esc(quote
+        $(@__MODULE__).register_options!($app, $path, $f)
     end)
 end
 
@@ -226,7 +241,7 @@ function _http_request_trampoline(
         headers_raw = String(copy(unsafe_wrap(Vector{UInt8}, headers_ptr, Int(headers_len))))
         body = copy(unsafe_wrap(Vector{UInt8}, body_ptr, Int(body_len)))
 
-        handler = get(app.http_routes, path, nothing)
+        handler = get(app.http_routes, (method, path), nothing)
         if handler === nothing
             return Cint(9)
         end
@@ -295,18 +310,21 @@ function _ensure_http_callback()
 end
 
 function _register_routes!(app::App)
-    for path in keys(app.http_routes)
+    for (method, path) in keys(app.http_routes)
+        method_bytes = Vector{UInt8}(codeunits(method))
         path_bytes = Vector{UInt8}(codeunits(path))
         status = ccall(
-            (:fmh_register_post, _load_rust_lib()),
+            (:fmh_register_http, _load_rust_lib()),
             Cint,
-            (Ptr{UInt8}, Csize_t, Ptr{Cvoid}, Ptr{Cvoid}),
+            (Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t, Ptr{Cvoid}, Ptr{Cvoid}),
+            method_bytes,
+            length(method_bytes),
             path_bytes,
             length(path_bytes),
             _ensure_http_callback(),
             C_NULL,
         )
-        _check_ffi_status(status, "register_post $path")
+        _check_ffi_status(status, "register_http $method $path")
     end
 
     for path in keys(app.ws_routes)

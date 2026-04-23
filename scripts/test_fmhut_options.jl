@@ -3,6 +3,10 @@ import Fomalhaut as FMHUT
 app = FMHUT.App()
 
 @FMHUT.post app "/echo" (req) -> begin
+    return (copy(req.body), "application/json", 201)
+end
+
+@FMHUT.options app "/echo" (req) -> begin
     return (UInt8[], "text/plain", 204)
 end
 

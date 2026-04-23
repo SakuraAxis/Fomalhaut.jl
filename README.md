@@ -27,7 +27,7 @@ Fomalhaut uses Tokio & tokio-tungstenite to build Asynchronous WebSocket. Tokio 
 
 run below to test `@FMHUT.websocket`
 
-( Front-end fetch usage is in this file too, just copy & paste it to browser console )
+( Front-end example is in this file too, just copy & paste it to browser console )
 
 `julia --project=. --threads=auto scripts/test_fmhut_websocket.jl`
 
@@ -56,7 +56,7 @@ FMHUT.serve(app; port=8080, fps=60)
 
 run below to test `@FMHUT.post`
 
-( Front-end fetch usage is in this file too, just copy & paste it to browser console )
+( Front-end example is in this file too, just copy & paste it to browser console )
 
 `julia --project=. --threads=auto scripts/test_fmhut_post.jl`
 
@@ -69,6 +69,30 @@ app = FMHUT.App()
     my_response = copy(req.body)
     
     return (my_response, "application/json", 201)
+end
+
+FMHUT.serve(app; port=8080)
+```
+
+### **OPTIONS** Registrations
+
+run below to test `@FMHUT.options`
+
+( Front-end example is in this file too, just copy & paste it to browser console )
+
+`julia --project=. --threads=auto scripts/test_fmhut_options.jl`
+
+```julia
+import Fomalhaut as FMHUT
+
+app = FMHUT.App()
+
+@FMHUT.post app "/echo" (req) -> begin
+    return (copy(req.body), "application/json", 201)
+end
+
+@FMHUT.options app "/echo" (req) -> begin
+    return (UInt8[], "text/plain", 204)
 end
 
 FMHUT.serve(app; port=8080)

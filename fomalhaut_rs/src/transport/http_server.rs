@@ -47,7 +47,7 @@ async fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
     let request_head = match peek_request_head(&stream).await {
         Ok(Some(head)) => head,
         Ok(None) => {
-            write_simple_response(&mut stream, 400, "text/plain", b"Bad Request", None).await?;
+            write_simple_response(&mut stream, 400, "text/plain", b"Bad Request", None, None, None).await?;
             return Ok(());
         }
         Err(e) => {
@@ -66,6 +66,10 @@ async fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
 
 async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
     let origin = request.headers.get("origin").map(|s| s.as_str());
+    let allow_headers = request
+        .headers
+        .get("access-control-request-headers")
+        .map(|s| s.as_str());
 
     let mut stream = request.stream;
 
@@ -73,14 +77,76 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
     let path_bytes = request.path.as_bytes().to_vec();
     let query_bytes = request.query.as_bytes().to_vec();
     let header_bytes = serialize_headers(&request.headers);
+    let allow_methods = allowed_methods_for_path(&request.path)?;
 
     if request.method == "OPTIONS" {
+        let options_route = {
+            let guard = state()
+                .lock()
+                .map_err(|_| io::Error::other("Runtime lock failed"))?;
+            guard
+                .http_routes
+                .get(&(request.method.clone(), request.path.clone()))
+                .copied()
+        };
+
+        if let Some(route) = options_route {
+            let body = request.body;
+            let callback_result = tokio::task::spawn_blocking(move || {
+                invoke_http_callback(route, &method_bytes, &path_bytes, &query_bytes, &header_bytes, &body)
+            })
+            .await
+            .map_err(|_| io::Error::other("Callback task failed"))?;
+
+            return match callback_result {
+                Ok(response) => {
+                    write_response(
+                        &mut stream,
+                        response.status_code,
+                        &response.content_type,
+                        &response.body,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    write_simple_response(
+                        &mut stream,
+                        500,
+                        "application/json",
+                        br#"{"error":"Handler failed"}"#,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await
+                }
+            };
+        }
+
+        if allow_methods.is_none() {
+            return write_simple_response(
+                &mut stream,
+                404,
+                "application/json",
+                br#"{"error":"Not Found"}"#,
+                origin,
+                None,
+                allow_headers,
+            )
+            .await;
+        }
+
         return write_response(
             &mut stream,
             204,
             "text/plain",
             b"",
             origin,
+            allow_methods.as_deref(),
+            allow_headers,
         )
         .await;
     }
@@ -93,6 +159,8 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
             "application/json",
             br#"{"status":"running","engine":"Fomalhaut"}"#,
             origin,
+            Some("GET, OPTIONS"),
+            allow_headers,
         ).await;
     }
 
@@ -101,16 +169,16 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
             .lock()
             .map_err(|_| io::Error::other("Runtime lock failed"))?;
 
-        if request.method == "POST" {
-            match guard.http_routes.get(&request.path) {
-                Some(route) => {
-                    RouteResolution::Handler(*route)
-                }
-                None => {
-                    RouteResolution::Immediate(404, r#"{"error":"Not Found"}"#, "application/json")
-                }
-            }
-        } else if guard.http_routes.contains_key(&request.path) {
+        if let Some(route) = guard
+            .http_routes
+            .get(&(request.method.clone(), request.path.clone()))
+        {
+            RouteResolution::Handler(*route)
+        } else if guard
+            .http_routes
+            .keys()
+            .any(|(_, path)| path == &request.path)
+        {
             RouteResolution::Immediate(405, r#"{"error":"Method Not Allowed"}"#, "application/json")
         } else {
             RouteResolution::Immediate(404, r#"{"error":"Not Found"}"#, "application/json")
@@ -119,7 +187,21 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
 
     match resolution {
         RouteResolution::Immediate(status, message, content_type) => {
-            write_simple_response(&mut stream, status, content_type, message.as_bytes(), origin).await?;
+            let allow_methods = if status == 405 {
+                allow_methods.as_deref()
+            } else {
+                None
+            };
+            write_simple_response(
+                &mut stream,
+                status,
+                content_type,
+                message.as_bytes(),
+                origin,
+                allow_methods,
+                allow_headers,
+            )
+            .await?;
             Ok(())
         }
         RouteResolution::Handler(route) => {
@@ -138,11 +220,22 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
                         &response.content_type,
                         &response.body,
                         origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
                     )
                     .await?;
                 }
                 Err(_) => {
-                    write_simple_response(&mut stream, 500, "application/json", br#"{"error":"Handler failed"}"#, origin).await?;
+                    write_simple_response(
+                        &mut stream,
+                        500,
+                        "application/json",
+                        br#"{"error":"Handler failed"}"#,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await?;
                 }
             }
 
@@ -298,8 +391,10 @@ async fn write_simple_response(
     content_type: &str,
     body: &[u8],
     origin: Option<&str>,
+    allow_methods: Option<&str>,
+    allow_headers: Option<&str>,
 ) -> io::Result<()> {
-    write_response(stream, status_code, content_type, body, origin).await
+    write_response(stream, status_code, content_type, body, origin, allow_methods, allow_headers).await
 }
 
 async fn write_response(
@@ -308,6 +403,8 @@ async fn write_response(
     content_type: &str,
     body: &[u8],
     _origin: Option<&str>,
+    allow_methods: Option<&str>,
+    allow_headers: Option<&str>,
 ) -> io::Result<()> {
     let status_text = reason_phrase(status_code);
     
@@ -324,8 +421,14 @@ async fn write_response(
     );
 
     header.push_str("Access-Control-Allow-Origin: *\r\n");
-    header.push_str("Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE\r\n");
-    header.push_str("Access-Control-Allow-Headers: Content-Type, Authorization, X-Custom-Header, X-Requested-With\r\n");
+    header.push_str(&format!(
+        "Access-Control-Allow-Methods: {}\r\n",
+        allow_methods.unwrap_or("GET, OPTIONS")
+    ));
+    header.push_str(&format!(
+        "Access-Control-Allow-Headers: {}\r\n",
+        allow_headers.unwrap_or("Content-Type, Authorization, X-Custom-Header, X-Requested-With")
+    ));
     header.push_str("Vary: Origin\r\n");
 
     header.push_str("\r\n");
@@ -333,6 +436,36 @@ async fn write_response(
     stream.write_all(header.as_bytes()).await?;
     stream.write_all(body).await?;
     stream.flush().await
+}
+
+fn allowed_methods_for_path(path: &str) -> io::Result<Option<String>> {
+    let guard = state()
+        .lock()
+        .map_err(|_| io::Error::other("Runtime lock failed"))?;
+
+    let mut methods: Vec<String> = guard
+        .http_routes
+        .keys()
+        .filter(|(_, route_path)| route_path == path)
+        .map(|(method, _)| method.clone())
+        .collect();
+
+    if path == "/" && !methods.iter().any(|method| method == "GET") {
+        methods.push("GET".to_string());
+    }
+
+    if methods.is_empty() {
+        return Ok(None);
+    }
+
+    if !methods.iter().any(|method| method == "OPTIONS") {
+        methods.push("OPTIONS".to_string());
+    }
+
+    methods.sort();
+    methods.dedup();
+
+    Ok(Some(methods.join(", ")))
 }
 
 fn reason_phrase(status_code: u16) -> &'static str {

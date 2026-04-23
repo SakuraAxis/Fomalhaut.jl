@@ -11,16 +11,24 @@ fn validate_path(path: &str) -> bool {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn fmh_register_post(
+pub extern "C" fn fmh_register_http(
+    method_ptr: *const u8,
+    method_len: usize,
     path_ptr: *const u8,
     path_len: usize,
     callback: HttpCallback,
     userdata: *mut c_void,
 ) -> i32 {
     let result = std::panic::catch_unwind(|| {
-        if path_ptr.is_null() {
+        if method_ptr.is_null() || path_ptr.is_null() {
             return super::errors::FFI_ERR_NULL_PTR;
         }
+
+        let method_bytes = unsafe { std::slice::from_raw_parts(method_ptr, method_len) };
+        let method = match std::str::from_utf8(method_bytes) {
+            Ok(v) if !v.is_empty() => v.to_ascii_uppercase(),
+            _ => return FFI_ERR_INVALID_ROUTE,
+        };
 
         let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
         let path = match std::str::from_utf8(path_bytes) {
@@ -32,7 +40,7 @@ pub extern "C" fn fmh_register_post(
             Ok(g) => g,
             Err(_) => return FFI_ERR_RUNTIME,
         };
-        guard.http_routes.insert(path, HttpRoute { callback, userdata });
+        guard.http_routes.insert((method, path), HttpRoute { callback, userdata });
         FFI_OK
     });
 
@@ -40,6 +48,23 @@ pub extern "C" fn fmh_register_post(
         Ok(code) => code,
         Err(_) => FFI_ERR_PANIC,
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fmh_register_post(
+    path_ptr: *const u8,
+    path_len: usize,
+    callback: HttpCallback,
+    userdata: *mut c_void,
+) -> i32 {
+    fmh_register_http(
+        b"POST".as_ptr(),
+        4,
+        path_ptr,
+        path_len,
+        callback,
+        userdata,
+    )
 }
 
 #[unsafe(no_mangle)]
