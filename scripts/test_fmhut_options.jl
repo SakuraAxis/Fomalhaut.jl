@@ -1,12 +1,12 @@
-using Fomalhaut
+import Fomalhaut as FMHUT
 
-app = App()
+app = FMHUT.App()
 
-@post app "/echo" (req) -> begin
+@FMHUT.post app "/echo" (req) -> begin
     return (UInt8[], "text/plain", 204)
 end
 
-serve(app; port=8080)
+FMHUT.serve(app; port=8080)
 
 #=
 Frontend Usage Example :

@@ -1,12 +1,10 @@
 module Fomalhaut
 
 using Libdl
-using JSON
 include("AsciiArt.jl")
 
 export App, Request, WebSocketContext, serve, stop_server!, @post, @websocket
 export CONTENT_TYPE_FLOAT32_TENSOR, CONTENT_TYPE_JSON, CONTENT_TYPE_RGBA_FRAME
-export json
 
 const _rust_lib_path = Ref{Union{Nothing, String}}(nothing)
 const _ffi_ok = Cint(0)
@@ -27,15 +25,6 @@ struct Request
     headers::Dict{String, String}
     query::String
     body::Vector{UInt8}
-end
-
-"""
-    json(req::Request)
-Parse the request body as JSON using JSON.jl.
-"""
-function json(req::Request)
-    # Important : must use copy(req.body) because String() will destroy the passed Vector
-    return JSON.parse(String(copy(req.body)))
 end
 
 struct WebSocketContext
@@ -150,13 +139,13 @@ end
 
 macro post(app, path, f)
     return esc(quote
-        Fomalhaut.register_post!($app, $path, $f)
+        $(@__MODULE__).register_post!($app, $path, $f)
     end)
 end
 
 macro websocket(app, path, f)
     return esc(quote
-        Fomalhaut.register_websocket!($app, $path, $f)
+        $(@__MODULE__).register_websocket!($app, $path, $f)
     end)
 end
 

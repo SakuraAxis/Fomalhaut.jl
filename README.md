@@ -23,14 +23,21 @@ Fomalhaut uses Tokio & tokio-tungstenite to build Asynchronous WebSocket. Tokio 
 
 ## WIP Project Fomalhaut
 
-### @websocket Example
+### `WebSocket` Registrations
+
+run below to test @FMHUT.websocket
+
+( Front-end fetch usage is in this file too, just copy & paste it to browser console)
+
+`julia --project=. --threads=auto scripts/test_fmhut_websocket.jl`
 
 ```julia
-using Fomalhaut
+import Fomalhaut as FMHUT
 
 const RES = 96
 const BUFFER = zeros(Float32, RES, RES)
 const R = range(-3f0, 3f0, length=RES)
+
 function wave_stream(ctx)
     t = Float32(ctx.time * 2.0)
     BUFFER .= sin.(R .+ t) .+ cos.(R' .+ t)
@@ -38,49 +45,33 @@ function wave_stream(ctx)
     return vec(BUFFER)
 end
 
-function start_server()
-    app = App()
-    
-    @websocket app "/live-wave" wave_stream
+app = FMHUT.App()
 
-    Fomalhaut.serve(app; fps=60)
-end
+@FMHUT.websocket app "/live-wave" wave_stream
 
-start_server()
+FMHUT.serve(app; port=8080, fps=60)
 ```
 
-### @post Example
+### `POST` Registrations
+
+run below to test `@FMHUT.post`
+
+( Front-end fetch usage is in this file too, just copy & paste it to browser console)
+
+`julia --project=. --threads=auto scripts/test_fmhut_post.jl`
 
 ```julia
-using Fomalhaut
+import Fomalhaut as FMHUT
 
-app = App()
+app = FMHUT.App()
 
-@post app "/echo" (req) -> begin
+@FMHUT.post app "/echo" (req) -> begin
     my_response = copy(req.body)
     
     return (my_response, "application/json", 201)
 end
 
-Fomalhaut.serve(app; port=8080)
-
-#=
-Frontend Usage Example :
-
-fetch("http://127.0.0.1:8080/echo", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "X-Custom-Header": "Fomalhaut-Test"
-  },
-  body: JSON.stringify({ message: "Hello Fomalhaut!" })
-})
-.then(res => {
-  console.log("Status ( Expected 201 ) :", res.status);
-  return res.json();
-})
-.then(data => console.log("Echo Result :", data));
-=#
+FMHUT.serve(app; port=8080)
 ```
 
 ## Project Dependencies Details

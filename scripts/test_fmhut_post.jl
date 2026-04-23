@@ -1,11 +1,14 @@
-using Fomalhaut
-app = App()
-@post app "/echo" (req) -> begin
+import Fomalhaut as FMHUT
+
+app = FMHUT.App()
+
+@FMHUT.post app "/echo" (req) -> begin
     my_response = copy(req.body)
     
     return (my_response, "application/json", 201)
 end
-serve(app; port=8080)
+
+FMHUT.serve(app; port=8080)
 
 #=
 Frontend Usage Example :

@@ -1,4 +1,4 @@
-using Fomalhaut
+import Fomalhaut as FMHUT
 
 const RES = 96
 const BUFFER = zeros(Float32, RES, RES)
@@ -11,11 +11,11 @@ function wave_stream(ctx)
     return vec(BUFFER)
 end
 
-app = App()
+app = FMHUT.App()
 
-@websocket app "/live-wave" wave_stream
+@FMHUT.websocket app "/live-wave" wave_stream
 
-serve(app; port=8080, fps=60)
+FMHUT.serve(app; port=8080, fps=60)
 
 #=
 Frontend Usage Example :
