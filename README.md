@@ -152,7 +152,7 @@ Fomalhaut supports specialized routes that bypass the Julia VM for maximum data 
 
 ### **Native ORM Routes** Registrations
 
-run below to test `@FMHUT.sea_get`, `@FMHUT.sea_post`, `@FMHUT.sea_put`, `@FMHUT.sea_patch`, `@FMHUT.sea_delete`, `@FMHUT.sea_options`
+run below to test `@FMHUT.sea_get`, `@FMHUT.sea_post`, `@FMHUT.sea_put`, `@FMHUT.sea_patch`, `@FMHUT.sea_delete`
 
 ( Front-end example is in this file too, just copy & paste it to browser console )
 
