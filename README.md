@@ -17,7 +17,7 @@ IMPORTANT : This project is still in the development and testing stages, licensi
 [![tokio-tungstenite](https://img.shields.io/badge/tokio_tungstenite-F04D23?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/snapview/tokio-tungstenite)
 [![SeaORM](https://img.shields.io/badge/Sea_ORM-F04D23?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/seaql/sea-orm)
 [![Julia](https://img.shields.io/badge/Julia-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/JuliaLang/julia)
-[![SakuraEngine.jl](https://img.shields.io/badge/SakuraEngine.jl-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/zzztzzzt/SakuraEngine.jl)
+[![SakuraEngine.jl](https://img.shields.io/badge/SakuraEngine.jl-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/SakuraAxis/SakuraEngine.jl)
 
 **[ for Dependencies Details please see the end of this README ]**
 
@@ -58,98 +58,37 @@ app = FMHUT.App()
 FMHUT.serve(app; port=8080, fps=60)
 ```
 
-### **POST** Registrations
+### **RESTful API** Registrations
 
-run below to test `@FMHUT.post`
+run below to test `@FMHUT.get`, `@FMHUT.post`, `@FMHUT.put`, `@FMHUT.patch`, `@FMHUT.delete`, `@FMHUT.options`
 
 ( Front-end example is in this file too, just copy & paste it to browser console )
 
-`julia --project=. --threads=auto scripts/test_fmhut_post.jl`
+`julia --project=. --threads=auto scripts/test_fmhut_http_methods.jl`
 
 ```julia
 import Fomalhaut as FMHUT
 
 app = FMHUT.App()
 
-@FMHUT.post app "/echo" (req) -> begin
-    my_response = copy(req.body)
-    
-    return (my_response, "application/json", 201)
-end
+# Mock Database
+const MOCK_DB = Dict("user-123" => "Nora", "user-456" => "Alexander")
 
-FMHUT.serve(app; port=8080)
-```
-
-### **GET** Registrations
-
-run below to test `@FMHUT.get`
-
-( Front-end example is in this file too, just copy & paste it to browser console )
-
-`julia --project=. --threads=auto scripts/test_fmhut_get.jl`
-
-```julia
-import Fomalhaut as FMHUT
-
-app = FMHUT.App()
-
-@FMHUT.get app "/hello" (req) -> begin
+@FMHUT.get app "/hello" begin
     response_text = "Hello from Fomalhaut GET endpoint!"
     return (Vector{UInt8}(response_text), "text/plain", 200)
 end
 
-FMHUT.serve(app; port=8080)
-```
-
-### **DELETE** Registrations
-
-run below to test `@FMHUT.delete`
-
-( Front-end example is in this file too, just copy & paste it to browser console )
-
-`julia --project=. --threads=auto scripts/test_fmhut_delete.jl`
-
-```julia
-import Fomalhaut as FMHUT
-
-app = FMHUT.App()
-
-const MOCK_DB = Dict("user-123" => "Nora", "user-456" => "Alexander")
-
-@FMHUT.delete app "/delete-user" (req) -> begin
-    user_id = String(copy(req.body))
-    
-    if haskey(MOCK_DB, user_id)
-        delete!(MOCK_DB, user_id)
-        response_text = "User $user_id deleted successfully. Remaining user(s) : $(length(MOCK_DB))"
-        return (Vector{UInt8}(response_text), "text/plain", 200)
-    else
-        response_text = "Error : User $user_id not found."
-        return (Vector{UInt8}(response_text), "text/plain", 404)
-    end
+@FMHUT.post app "/echo" begin
+    return (copy(req.body), "application/json", 201)
 end
 
-FMHUT.serve(app; port=8080)
-```
+@FMHUT.options app "/echo" begin
+    return (UInt8[], "text/plain", 204)
+end
 
-### **PUT** Registrations
-
-run below to test `@FMHUT.put`
-
-( Front-end example is in this file too, just copy & paste it to browser console )
-
-`julia --project=. --threads=auto scripts/test_fmhut_put.jl`
-
-```julia
-import Fomalhaut as FMHUT
-
-app = FMHUT.App()
-
-const MOCK_DB = Dict("user-123" => "Nora", "user-456" => "Alexander")
-
-@FMHUT.put app "/replace-user" (req) -> begin
+@FMHUT.put app "/replace-user" begin
     body_str = String(copy(req.body))
-    
     parts = split(body_str, ":"; limit=2)
     if length(parts) != 2
         return (Vector{UInt8}("Error : Invalid body format. Expected 'ID:NewName'"), "text/plain", 400)
@@ -165,31 +104,12 @@ const MOCK_DB = Dict("user-123" => "Nora", "user-456" => "Alexander")
     else
         MOCK_DB[user_id] = new_name
         response_text = "User $user_id created successfully with name : $new_name"
-        return (Vector{UInt8}(response_text), "text/plain", 201) # 201 Created
+        return (Vector{UInt8}(response_text), "text/plain", 201)
     end
 end
 
-FMHUT.serve(app; port=8080)
-```
-
-### **PATCH** Registrations
-
-run below to test `@FMHUT.patch`
-
-( Front-end example is in this file too, just copy & paste it to browser console )
-
-`julia --project=. --threads=auto scripts/test_fmhut_patch.jl`
-
-```julia
-import Fomalhaut as FMHUT
-
-app = FMHUT.App()
-
-const MOCK_DB = Dict("user-123" => "Nora", "user-456" => "Alexander")
-
-@FMHUT.patch app "/update-user" (req) -> begin
+@FMHUT.patch app "/update-user" begin
     body_str = String(copy(req.body))
-    
     parts = split(body_str, ":"; limit=2)
     if length(parts) != 2
         return (Vector{UInt8}("Error : Invalid body format. Expected 'ID:NewName'"), "text/plain", 400)
@@ -201,7 +121,6 @@ const MOCK_DB = Dict("user-123" => "Nora", "user-456" => "Alexander")
     if haskey(MOCK_DB, user_id)
         old_name = MOCK_DB[user_id]
         MOCK_DB[user_id] = new_name
-        
         response_text = "User $user_id updated successfully. $old_name -> $new_name"
         return (Vector{UInt8}(response_text), "text/plain", 200)
     else
@@ -209,30 +128,21 @@ const MOCK_DB = Dict("user-123" => "Nora", "user-456" => "Alexander")
     end
 end
 
-FMHUT.serve(app; port=8080)
-```
-
-### **OPTIONS** Registrations
-
-run below to test `@FMHUT.options`
-
-( Front-end example is in this file too, just copy & paste it to browser console )
-
-`julia --project=. --threads=auto scripts/test_fmhut_options.jl`
-
-```julia
-import Fomalhaut as FMHUT
-
-app = FMHUT.App()
-
-@FMHUT.post app "/echo" (req) -> begin
-    return (copy(req.body), "application/json", 201)
+@FMHUT.delete app "/delete-user" begin
+    user_id = String(copy(req.body))
+    
+    if haskey(MOCK_DB, user_id)
+        delete!(MOCK_DB, user_id)
+        response_text = "User $user_id deleted successfully. Remaining user(s) : $(length(MOCK_DB))"
+        return (Vector{UInt8}(response_text), "text/plain", 200)
+    else
+        response_text = "Error : User $user_id not found."
+        return (Vector{UInt8}(response_text), "text/plain", 404)
+    end
 end
 
-@FMHUT.options app "/echo" (req) -> begin
-    return (UInt8[], "text/plain", 204)
-end
-
+# Server Start
+println("Fomalhaut Methods Test Server starting on http://127.0.0.1:8080")
 FMHUT.serve(app; port=8080)
 ```
 
@@ -245,7 +155,7 @@ Fomalhaut supports specialized routes that bypass the Julia VM for maximum data 
 Run this to see the performance difference between Julia-side-ORM-query and Rust-side-native-query :
 
 ```bash
-julia --project=. scripts/benchmark_native_vs_julia.jl
+julia --project=. scripts/benchmark_sea_vs_julia.jl
 ```
 
 ### Running the Workflow Test
