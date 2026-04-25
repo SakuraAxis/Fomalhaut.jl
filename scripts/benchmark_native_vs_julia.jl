@@ -4,6 +4,7 @@ using JSON
 using HTTP
 using Dates
 using Statistics
+using Logging
 
 # 1. Setup Database with 5,000 records
 db_path = "benchmark_test.db"
@@ -28,8 +29,8 @@ FMHUT.connect_db("sqlite://$db_path")
 # [Path A] Standard Julia Route ( SearchLight -> JSON -> Rust -> Network )
 @FMHUT.get app "/julia/data" begin
     data = SearchLight.query("SELECT * FROM sensor_data LIMIT 5000")
-    # Simulate standard ORM to JSON workflow
-    return Vector{UInt8}(JSON.json(data)), "application/json"
+    rows = [Dict(String(col) => data[i, col] for col in names(data)) for i in 1:size(data, 1)]
+    return Vector{UInt8}(JSON.json(rows)), "application/json"
 end
 
 # [Path B] Native Rust Route ( SeaORM -> Rust -> Network )
@@ -60,9 +61,18 @@ function run_benchmark(url, name, iterations=100)
     return mean(times)
 end
 
+# Warmup Phase ( To eliminate Julia JIT overhead )
+println("Warming up JIT compiler...")
+HTTP.get("http://127.0.0.1:8081/julia/data")
+HTTP.get("http://127.0.0.1:8081/rust/data?limit=5000")
+println("Warmup complete.\n")
+
+# Disable all Info logging for the actual benchmark runs
+global_logger(ConsoleLogger(stderr, Logging.Warn))
+
 try
-    rust_avg = run_benchmark("http://127.0.0.1:8081/rust/data?limit=5000", "Native Rust Path")
     julia_avg = run_benchmark("http://127.0.0.1:8081/julia/data", "Standard Julia Path")
+    rust_avg = run_benchmark("http://127.0.0.1:8081/rust/data?limit=5000", "Native Rust Path")
 
     speedup = julia_avg / rust_avg
 

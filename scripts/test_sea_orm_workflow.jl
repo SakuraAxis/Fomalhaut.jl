@@ -41,6 +41,6 @@ FMHUT.connect_db("sqlite://fomalhaut_demo.db")
 
 println("Fomalhaut : Native SeaORM route registered")
 println("Server starting at http://127.0.0.1:8080")
-println("Test command: curl http://127.0.0.1:8080/api/users/1")
+println("Test command : curl http://127.0.0.1:8080/api/users/1")
 
 FMHUT.serve(app; port=8080)
