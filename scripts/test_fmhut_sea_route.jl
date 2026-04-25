@@ -45,8 +45,38 @@ FMHUT.connect_db("sqlite://fomalhaut_demo.db")
 
 println("Fomalhaut : Native SeaORM routes registered")
 println("Server starting at http://127.0.0.1:8080")
-println("Test GET command : curl http://127.0.0.1:8080/api/users/1")
-println("Test DELETE command : curl -X DELETE http://127.0.0.1:8080/api/users/1")
-println("Note: POST, PUT, PATCH are registered in Julia but not yet fully implemented in Rust backend.")
 
 FMHUT.serve(app; port=8080)
+
+#=
+Frontend Usage Examples :
+
+// Step 1. GET Test ( Fetch user 1 )
+fetch("http://127.0.0.1:8080/api/users/1").then(res => res.json()).then(data => console.log("GET :", data));
+
+// Step 2. POST Test ( Create a new user )
+fetch("http://127.0.0.1:8080/api/users", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name: "Alice", email: "alice@fomalhaut.io" })
+}).then(res => res.json()).then(data => console.log("POST :", data));
+
+// Step 3. PUT Test ( Replace user 1 data )
+fetch("http://127.0.0.1:8080/api/users/1", {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name: "SearchLight User Updated", email: "sl_updated@fomalhaut.io" })
+}).then(res => res.json()).then(data => console.log("PUT :", data));
+
+// Step 4. PATCH Test ( Update only user 1's email )
+fetch("http://127.0.0.1:8080/api/users/1", {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "sl_patched@fomalhaut.io" })
+}).then(res => res.json()).then(data => console.log("PATCH :", data));
+
+// Step 5. DELETE Test ( Delete user 1 )
+fetch("http://127.0.0.1:8080/api/users/1", {
+  method: "DELETE"
+}).then(res => res.json()).then(data => console.log("DELETE :", data));
+=#

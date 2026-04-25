@@ -65,6 +65,69 @@ pub async fn handle_native_request(
             Ok(json!({ "status": "success", "action": "deleted" }).to_string())
         }
 
+        "POST" => {
+            let json_body: JsonValue = serde_json::from_slice(&_body).map_err(|e| e.to_string())?;
+            let obj = json_body.as_object().ok_or("Request body must be a JSON object")?;
+
+            if obj.is_empty() {
+                return Err("Request body cannot be empty".to_string());
+            }
+
+            let mut keys = Vec::new();
+            let mut values = Vec::new();
+            let mut placeholders = Vec::new();
+
+            for (k, v) in obj {
+                keys.push(k.clone());
+                values.push(json_to_value(v.clone()));
+                placeholders.push("?");
+            }
+
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({})",
+                table_name,
+                keys.join(", "),
+                placeholders.join(", ")
+            );
+
+            let stmt = Statement::from_sql_and_values(backend, sql, values);
+            db.execute_raw(stmt).await.map_err(|e| e.to_string())?;
+
+            Ok(json!({ "status": "success", "action": "created" }).to_string())
+        }
+
+        "PUT" | "PATCH" => {
+            let id = extract_id(path).ok_or("Resource ID required")?;
+            let json_body: JsonValue = serde_json::from_slice(&_body).map_err(|e| e.to_string())?;
+            let obj = json_body.as_object().ok_or("Request body must be a JSON object")?;
+
+            if obj.is_empty() {
+                return Err("Request body cannot be empty".to_string());
+            }
+
+            let mut set_clauses = Vec::new();
+            let mut values = Vec::new();
+
+            for (k, v) in obj {
+                set_clauses.push(format!("{} = ?", k));
+                values.push(json_to_value(v.clone()));
+            }
+
+            // ID for the WHERE clause
+            values.push(Value::String(Some(id)));
+
+            let sql = format!(
+                "UPDATE {} SET {} WHERE id = ?",
+                table_name,
+                set_clauses.join(", ")
+            );
+
+            let stmt = Statement::from_sql_and_values(backend, sql, values);
+            db.execute_raw(stmt).await.map_err(|e| e.to_string())?;
+
+            Ok(json!({ "status": "success", "action": "updated" }).to_string())
+        }
+
         _ => Err(format!("HTTP method {} not implemented for native engine", method)),
     }
 }
@@ -105,4 +168,23 @@ fn row_to_json(row: sea_orm::QueryResult) -> Result<JsonValue, String> {
     }
 
     Ok(JsonValue::Object(map))
+}
+
+fn json_to_value(v: JsonValue) -> Value {
+    match v {
+        JsonValue::Null => Value::String(None),
+        JsonValue::Bool(b) => b.into(),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i.into()
+            } else if let Some(f) = n.as_f64() {
+                f.into()
+            } else {
+                Value::String(None)
+            }
+        }
+        JsonValue::String(s) => s.into(),
+        JsonValue::Array(a) => serde_json::to_string(&a).unwrap_or_default().into(),
+        JsonValue::Object(o) => serde_json::to_string(&o).unwrap_or_default().into(),
+    }
 }
