@@ -1,5 +1,5 @@
 function _build_envelope_v1(
-    payload::Vector{UInt8};
+    payload::AbstractVector{UInt8};
     content_type::UInt16 = CONTENT_TYPE_FLOAT32_TENSOR,
     flags::UInt16 = 0x0000,
     timestamp_ns::UInt64 = UInt64(time_ns()),
@@ -13,7 +13,7 @@ function _build_envelope_v1(
     frame[4:5] = reinterpret(UInt8, [htol(flags)])
     frame[6:13] = reinterpret(UInt8, [htol(timestamp_ns)])
     frame[14:17] = reinterpret(UInt8, [htol(UInt32(payload_len))])
-    frame[18:end] = payload
+    copyto!(frame, ENVELOPE_HEADER_LEN + 1, payload, firstindex(payload), payload_len)
     return frame
 end
 
@@ -68,7 +68,7 @@ end
 
 function broadcast_frame!(
     path::AbstractString,
-    payload::Vector{UInt8};
+    payload::AbstractVector{UInt8};
     content_type::UInt16 = CONTENT_TYPE_FLOAT32_TENSOR,
     flags::UInt16 = 0x0000,
     timestamp_ns::UInt64 = UInt64(time_ns()),
