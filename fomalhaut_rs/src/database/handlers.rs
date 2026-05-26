@@ -62,7 +62,6 @@ pub async fn handle_native_request(
                 );
                 let query_res = db.query_all_raw(stmt).await.map_err(|e| e.to_string())?;
 
-                // Pre-configure Vec capacity to avoid multiple memory expansions and relocations during the loop
                 let mut rows = Vec::with_capacity(query_res.len());
                 for row in query_res {
                     rows.push(row_to_json(row)?);
@@ -127,7 +126,7 @@ pub async fn handle_native_request(
 
             let len = obj.len();
             let mut set_clauses = Vec::with_capacity(len);
-            let mut values = Vec::with_capacity(len + 1); // Leave an extra space for the ID at the end
+            let mut values = Vec::with_capacity(len + 1);
 
             for (k, v) in obj {
                 set_clauses.push(format!("{} = ?", validate_identifier(k)?));
@@ -168,16 +167,24 @@ fn extract_query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 
 /// Dynamic Row -> JSON conversion
 fn row_to_json(row: sea_orm::QueryResult) -> Result<JsonValue, String> {
-    let json_query_res = sea_orm::JsonQueryResult::from(row);
+    let mut map = Map::new();
     
-    Ok(json_query_res.into_json())
+    for col in row.column_names() {
+        if let Ok(v) = row.try_get::<JsonValue>("", &col) {
+            map.insert(col, v);
+        } else {
+            map.insert(col, JsonValue::Null);
+        }
+    }
+
+    Ok(JsonValue::Object(map))
 }
 
 fn json_to_value(v: JsonValue) -> Value {
     match v {
         JsonValue::Null => Value::String(None),
         
-        JsonValue::Bool(b) => Value::Boolean(Some(b)),
+        JsonValue::Bool(b) => Value::Bool(Some(b)),
         
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {

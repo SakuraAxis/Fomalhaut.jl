@@ -257,7 +257,7 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
                     let query = request.query.clone();
                     let body = request.body.clone();
                     
-                    match crate::database::handlers::handle_native_request(&entity, conn, &method, &path, &query, body).await {
+                    match crate::database::handlers::handle_native_request(&entity, &conn, &method, &path, &query, &body).await {
                         Ok(json_res) => {
                             write_response(
                                 &mut stream,
