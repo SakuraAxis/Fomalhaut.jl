@@ -10,6 +10,7 @@ use crate::transport::websocket;
 
 const HEADER_READ_LIMIT: usize = 64 * 1024;
 const BODY_READ_LIMIT: usize = 32 * 1024 * 1024;
+const REQUEST_TIMEOUT_SECS: u64 = 30;
 
 pub async fn run_until_shutdown(addr: &str, shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
     let listener = tokio::net::TcpListener::bind(addr)
@@ -43,7 +44,17 @@ pub async fn run_with_listener(listener: tokio::net::TcpListener, mut shutdown_r
     }
 }
 
-async fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
+async fn handle_connection(stream: TcpStream) -> io::Result<()> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
+        handle_connection_inner(stream)
+    ).await {
+        Ok(result) => result,
+        Err(_) => Ok(()),
+    }
+}
+
+async fn handle_connection_inner(mut stream: TcpStream) -> io::Result<()> {
     let request_head = match peek_request_head(&stream).await {
         Ok(Some(head)) => head,
         Ok(None) => {
@@ -361,7 +372,16 @@ async fn peek_request_head(stream: &TcpStream) -> io::Result<Option<RequestHead>
     Ok(None)
 }
 
-async fn read_http_request(mut stream: TcpStream) -> io::Result<ParsedRequest> {
+async fn read_http_request(stream: TcpStream) -> io::Result<ParsedRequest> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
+        read_http_request_inner(stream)
+    )
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Request read timeout"))?
+}
+
+async fn read_http_request_inner(mut stream: TcpStream) -> io::Result<ParsedRequest> {
     let mut buffer = Vec::new();
     while find_headers_end(&buffer).is_none() {
         if buffer.len() >= HEADER_READ_LIMIT {
