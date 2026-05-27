@@ -430,6 +430,33 @@ async fn read_http_request_inner(mut stream: TcpStream) -> io::Result<ParsedRequ
     })
 }
 
+fn percent_decode(s: &str) -> String {
+    let mut result = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                result.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(result).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn parse_request_head(preview: &[u8]) -> Option<RequestHead> {
     let headers_end = find_headers_end(preview)?;
     let header_bytes = &preview[..headers_end];
@@ -442,6 +469,7 @@ fn parse_request_head(preview: &[u8]) -> Option<RequestHead> {
     let _version = request_parts.next()?;
 
     let (path, query) = split_target(&target);
+    let path = percent_decode(&path);
     let mut headers = HashMap::new();
     for line in lines {
         if line.is_empty() {
