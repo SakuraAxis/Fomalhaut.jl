@@ -97,134 +97,38 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
 
     let mut stream = request.stream;
 
-    let method_bytes = request.method.as_bytes().to_vec();
-    let path_bytes = request.path.as_bytes().to_vec();
-    let query_bytes = request.query.as_bytes().to_vec();
-    let header_bytes = serialize_headers(&request.headers);
-    let allow_methods = allowed_methods_for_path(&request.path)?;
-
-    if request.method == "OPTIONS" {
-        let options_route = {
-            let guard = state()
-                .lock()
-                .map_err(|_| io::Error::other("Runtime lock failed"))?;
-            guard
-                .http_routes
-                .get(&(request.method.clone(), request.path.clone()))
-                .copied()
-        };
-
-        if let Some(route) = options_route {
-            let body = request.body;
-            let callback_result = tokio::task::spawn_blocking(move || {
-                invoke_http_callback(route, &method_bytes, &path_bytes, &query_bytes, &header_bytes, &body)
-            })
-            .await
-            .map_err(|_| io::Error::other("Callback task failed"))?;
-
-            return match callback_result {
-                Ok(response) => {
-                    write_response(
-                        &mut stream,
-                        response.status_code,
-                        &response.content_type,
-                        &response.body,
-                        origin,
-                        allow_methods.as_deref(),
-                        allow_headers,
-                    )
-                    .await
-                }
-                Err(_) => {
-                    write_response(
-                        &mut stream,
-                        500,
-                        "application/json",
-                        br#"{"error":"Handler failed"}"#,
-                        origin,
-                        allow_methods.as_deref(),
-                        allow_headers,
-                    )
-                    .await
-                }
-            };
-        }
-
-        if allow_methods.is_none() {
-            return write_response(
-                &mut stream,
-                404,
-                "application/json",
-                br#"{"error":"Not Found"}"#,
-                origin,
-                None,
-                allow_headers,
-            )
-            .await;
-        }
-
-        return write_response(
-            &mut stream,
-            204,
-            "text/plain",
-            b"",
-            origin,
-            allow_methods.as_deref(),
-            allow_headers,
-        )
-        .await;
+    let method_upper = request.method.to_ascii_uppercase();
+    
+    let mut normalized_path = request.path.clone();
+    if normalized_path.len() > 1 && normalized_path.ends_with('/') {
+        normalized_path.pop();
     }
 
-    // Basic GET support for health checks/connectivity
-    if request.method == "GET" && request.path == "/" {
-        return write_response(
-            &mut stream,
-            200,
-            "application/json",
-            br#"{"status":"running","engine":"Fomalhaut"}"#,
-            origin,
-            Some("GET, OPTIONS"),
-            allow_headers,
-        ).await;
-    }
-
-    let (resolution, _matched_path) = {
+    let (resolution, _matched_pattern_path) = {
         let guard = state()
             .lock()
             .map_err(|_| io::Error::other("Runtime lock failed"))?;
 
-        let method = request.method.to_ascii_uppercase();
-        let mut path = request.path.clone();
-        
-        // Normalize path : remove trailing slash unless it's just "/"
-        if path.len() > 1 && path.ends_with('/') {
-            path.pop();
-        }
+        let route_key = (method_upper.clone(), normalized_path.clone());
 
-        let route_key = (method.clone(), path.clone());
-
-        // 1. Try Exact Match
         if let Some(route) = guard.http_routes.get(&route_key) {
-            (RouteResolution::Handler(*route), path)
+            (RouteResolution::Handler(*route), Some(normalized_path.clone()))
         } else if let Some(entity) = guard.native_routes.get(&route_key) {
-            (RouteResolution::Native(entity.clone()), path)
+            (RouteResolution::Native(entity.clone()), Some(normalized_path.clone()))
         } else {
-            // 2. Try Parameter Match ( e.g., /api/users/:id )
             let mut found = None;
             
-            // Check Native Routes
             for ((m, p), entity) in &guard.native_routes {
-                if m == &method && match_dynamic_path(p, &path) {
-                    found = Some((RouteResolution::Native(entity.clone()), p.clone()));
+                if m == &method_upper && match_dynamic_path(p, &normalized_path) {
+                    found = Some((RouteResolution::Native(entity.clone()), Some(p.clone())));
                     break;
                 }
             }
 
             if found.is_none() {
-                // Check Julia Routes
                 for ((m, p), route) in &guard.http_routes {
-                    if m == &method && match_dynamic_path(p, &path) {
-                        found = Some((RouteResolution::Handler(*route), p.clone()));
+                    if m == &method_upper && match_dynamic_path(p, &normalized_path) {
+                        found = Some((RouteResolution::Handler(*route), Some(p.clone())));
                         break;
                     }
                 }
@@ -233,99 +137,91 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
             if let Some(res) = found {
                 res
             } else {
-                // 3. Method Not Allowed or Not Found
                 let exists_on_other_method = guard.http_routes.keys()
                     .chain(guard.native_routes.keys())
-                    .any(|(_, p)| p == &path || match_dynamic_path(p, &path));
+                    .any(|(_, p)| p == &normalized_path || match_dynamic_path(p, &normalized_path));
 
                 if exists_on_other_method {
-                    (RouteResolution::Immediate(405, r#"{"error":"Method Not Allowed"}"#.to_string(), "application/json"), path)
+                    (RouteResolution::Immediate(405, r#"{"error":"Method Not Allowed"}"#.to_string(), "application/json"), None)
                 } else {
-                    (RouteResolution::Immediate(404, r#"{"error":"Not Found"}"#.to_string(), "application/json"), path)
+                    (RouteResolution::Immediate(404, r#"{"error":"Not Found"}"#.to_string(), "application/json"), None)
                 }
             }
         }
     };
 
+    let allow_methods = if request.method == "OPTIONS" || resolution_is_405(&resolution) {
+        allowed_methods_for_path(&normalized_path)?
+    } else {
+        None
+    };
+
+    if request.method == "OPTIONS" {
+        if let RouteResolution::Handler(route) = resolution {
+            let body = request.body;
+            let method_bytes = request.method.as_bytes().to_vec();
+            let path_bytes = request.path.as_bytes().to_vec();
+            let query_bytes = request.query.as_bytes().to_vec();
+            let header_bytes = serialize_headers(&request.headers);
+
+            let callback_result = tokio::task::spawn_blocking(move || {
+                invoke_http_callback(route, &method_bytes, &path_bytes, &query_bytes, &header_bytes, &body)
+            })
+            .await
+            .map_err(|_| io::Error::other("Callback task failed"))?;
+
+            return match callback_result {
+                Ok(response) => {
+                    write_response(&mut stream, response.status_code, &response.content_type, &response.body, origin, allow_methods.as_deref(), allow_headers).await
+                }
+                Err(_) => {
+                    write_response(&mut stream, 500, "application/json", br#"{"error":"Handler failed"}"#, origin, allow_methods.as_deref(), allow_headers).await
+                }
+            };
+        }
+
+        if allow_methods.is_none() {
+            return write_response(&mut stream, 404, "application/json", br#"{"error":"Not Found"}"#, origin, None, allow_headers).await;
+        }
+
+        return write_response(&mut stream, 204, "text/plain", b"", origin, allow_methods.as_deref(), allow_headers).await;
+    }
+
+    if request.method == "GET" && request.path == "/" {
+        return write_response(&mut stream, 200, "application/json", br#"{"status":"running","engine":"Fomalhaut"}"#, origin, Some("GET, OPTIONS"), allow_headers).await;
+    }
+
     match resolution {
         RouteResolution::Immediate(status, message, content_type) => {
-            let allow_methods = if status == 405 {
-                allow_methods.as_deref()
-            } else {
-                None
-            };
-            write_response(
-                &mut stream,
-                status,
-                content_type,
-                message.as_bytes(),
-                origin,
-                allow_methods,
-                allow_headers,
-            )
-            .await?;
-            Ok(())
+            write_response(&mut stream, status, content_type, message.as_bytes(), origin, allow_methods.as_deref(), allow_headers).await?;
         }
         RouteResolution::Native(entity) => {
-            let db = {
-                let guard = state()
-                    .lock()
-                    .map_err(|_| io::Error::other("Runtime lock failed"))?;
-                guard.db.clone()
-            };
+            let db = state().lock().map_err(|_| io::Error::other("Runtime lock failed"))?.db.clone();
 
             match db {
                 Some(conn) => {
-                    let method = request.method.clone();
-                    let path = request.path.clone();
-                    let query = request.query.clone();
-                    let body = request.body.clone();
-                    
-                    match crate::database::handlers::handle_native_request(&entity, &conn, &method, &path, &query, &body).await {
+                    match crate::database::handlers::handle_native_request(&entity, &conn, &request.method, &request.path, &request.query, &request.body).await {
                         Ok(json_res) => {
-                            write_response(
-                                &mut stream,
-                                200,
-                                "application/json",
-                                json_res.as_bytes(),
-                                origin,
-                                allow_methods.as_deref(),
-                                allow_headers,
-                            )
-                            .await?;
+                            write_response(&mut stream, 200, "application/json", json_res.as_bytes(), origin, allow_methods.as_deref(), allow_headers).await?;
                         }
                         Err(err) => {
                             let err_msg = format!(r#"{{"error":"Native handler failed","details":"{}"}}"#, err);
-                            write_response(
-                                &mut stream,
-                                500,
-                                "application/json",
-                                err_msg.as_bytes(),
-                                origin,
-                                allow_methods.as_deref(),
-                                allow_headers,
-                            )
-                            .await?;
+                            write_response(&mut stream, 500, "application/json", err_msg.as_bytes(), origin, allow_methods.as_deref(), allow_headers).await?;
                         }
                     }
                 }
                 None => {
-                    write_response(
-                        &mut stream,
-                        503,
-                        "application/json",
-                        br#"{"error":"Database not connected","info":"Call connect_db() in Julia before starting server"}"#,
-                        origin,
-                        allow_methods.as_deref(),
-                        allow_headers,
-                    )
-                    .await?;
+                    write_response(&mut stream, 503, "application/json", br#"{"error":"Database not connected","info":"..."}"#, origin, allow_methods.as_deref(), allow_headers).await?;
                 }
             }
-            Ok(())
         }
         RouteResolution::Handler(route) => {
             let body = request.body;
+            let method_bytes = request.method.as_bytes().to_vec();
+            let path_bytes = request.path.as_bytes().to_vec();
+            let query_bytes = request.query.as_bytes().to_vec();
+            let header_bytes = serialize_headers(&request.headers);
+
             let callback_result = tokio::task::spawn_blocking(move || {
                 invoke_http_callback(route, &method_bytes, &path_bytes, &query_bytes, &header_bytes, &body)
             })
@@ -334,33 +230,22 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
 
             match callback_result {
                 Ok(response) => {
-                    write_response(
-                        &mut stream,
-                        response.status_code,
-                        &response.content_type,
-                        &response.body,
-                        origin,
-                        allow_methods.as_deref(),
-                        allow_headers,
-                    )
-                    .await?;
+                    write_response(&mut stream, response.status_code, &response.content_type, &response.body, origin, allow_methods.as_deref(), allow_headers).await?;
                 }
                 Err(_) => {
-                    write_response(
-                        &mut stream,
-                        500,
-                        "application/json",
-                        br#"{"error":"Handler failed"}"#,
-                        origin,
-                        allow_methods.as_deref(),
-                        allow_headers,
-                    )
-                    .await?;
+                    write_response(&mut stream, 500, "application/json", br#"{"error":"Handler failed"}"#, origin, allow_methods.as_deref(), allow_headers).await?;
                 }
             }
-
-            Ok(())
         }
+    }
+
+    Ok(())
+}
+
+fn resolution_is_405(res: &RouteResolution) -> bool {
+    match res {
+        RouteResolution::Immediate(405, _, _) => true,
+        _ => false,
     }
 }
 
@@ -630,25 +515,21 @@ fn match_dynamic_path(pattern: &str, actual: &str) -> bool {
 }
 
 fn allowed_methods_for_path(path: &str) -> io::Result<Option<String>> {
-    let guard = state()
-        .lock()
-        .map_err(|_| io::Error::other("Runtime lock failed"))?;
+    let mut methods: Vec<String> = {
+        let guard = state()
+            .lock()
+            .map_err(|_| io::Error::other("Runtime lock failed"))?;
 
-    let normalized = if path.len() > 1 && path.ends_with('/') {
-        path.trim_end_matches('/').to_string()
-    } else {
-        path.to_string()
+        guard
+            .http_routes
+            .keys()
+            .chain(guard.native_routes.keys())
+            .filter(|(_, route_path)| {
+                route_path == path || match_dynamic_path(route_path, path)
+            })
+            .map(|(method, _)| method.clone())
+            .collect()
     };
-
-    let mut methods: Vec<String> = guard
-        .http_routes
-        .keys()
-        .chain(guard.native_routes.keys())
-        .filter(|(_, route_path)| {
-            route_path == &normalized || match_dynamic_path(route_path, &normalized)
-        })
-        .map(|(method, _)| method.clone())
-        .collect();
 
     if path == "/" && !methods.iter().any(|method| method == "GET") {
         methods.push("GET".to_string());
