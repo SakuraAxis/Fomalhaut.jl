@@ -71,7 +71,20 @@ async fn handle_connection_inner(mut stream: TcpStream) -> io::Result<()> {
         return Ok(());
     }
 
-    let request = read_http_request(stream).await?;
+    let request = match read_http_request(stream).await {
+        Ok(r) => r,
+        Err(e) => {
+            let (status, _msg) = match e.kind() {
+                io::ErrorKind::InvalidData => (400, &b"Bad Request"[..]),
+                io::ErrorKind::TimedOut => (408, &b"Request Timeout"[..]),
+                _ => (500, &b"Internal Server Error"[..]),
+            };
+
+            eprintln!("Request read error ({}): {}", status, e);
+            return Ok(());
+        }
+    };
+
     handle_http_request(request).await
 }
 
@@ -353,23 +366,11 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
 
 async fn peek_request_head(stream: &TcpStream) -> io::Result<Option<RequestHead>> {
     let mut buf = vec![0_u8; HEADER_READ_LIMIT];
-    let mut attempts = 0;
-
-    while attempts < 20 {
-        let len = stream.peek(&mut buf).await?;
-        if len == 0 {
-            return Ok(None);
-        }
-
-        if let Some(head) = parse_request_head(&buf[..len]) {
-            return Ok(Some(head));
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        attempts += 1;
+    let len = stream.peek(&mut buf).await?;
+    if len == 0 {
+        return Ok(None);
     }
-
-    Ok(None)
+    Ok(parse_request_head(&buf[..len]))
 }
 
 async fn read_http_request(stream: TcpStream) -> io::Result<ParsedRequest> {
@@ -399,6 +400,16 @@ async fn read_http_request_inner(mut stream: TcpStream) -> io::Result<ParsedRequ
     let headers_end = find_headers_end(&buffer).unwrap();
     let head = parse_request_head(&buffer[..headers_end])
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid request head"))?;
+    
+    if let Some(te) = head.headers.get("transfer-encoding") {
+        if te.to_ascii_lowercase().contains("chunked") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "chunked transfer-encoding not supported",
+            ));
+        }
+    }
+
     let content_length = head
         .headers
         .get("content-length")
