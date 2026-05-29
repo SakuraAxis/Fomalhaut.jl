@@ -1,20 +1,16 @@
-function _rust_lib_filename()
-    if Sys.iswindows()
-        return "fomalhaut_rs.dll"
-    elseif Sys.isapple()
-        return "libfomalhaut_rs.dylib"
-    else
-        return "libfomalhaut_rs.so"
-    end
-end
+const _RUST_LIB_FILENAME =
+    Sys.iswindows() ? "fomalhaut_rs.dll" :
+    Sys.isapple()   ? "libfomalhaut_rs.dylib" :
+                      "libfomalhaut_rs.so"
+@inline _rust_lib_filename() = _RUST_LIB_FILENAME
 
-function _rust_lib_candidates()
-    file = _rust_lib_filename()
-    return (
+const _RUST_LIB_CANDIDATES = let file = _rust_lib_filename()
+    (
         joinpath(@__DIR__, "..", "..", "fomalhaut_rs", "target", "release", file),
         joinpath(@__DIR__, "..", "..", "fomalhaut_rs", "target", "debug", file),
     )
 end
+@inline _rust_lib_candidates() = _RUST_LIB_CANDIDATES
 
 function _load_rust_lib()
     if _rust_lib_path[] !== nothing
@@ -31,46 +27,47 @@ function _load_rust_lib()
     error("Could not find Rust dynamic library. Build fomalhaut_rs first ( cargo build --release ).")
 end
 
-function _ffi_error_message(code::Integer)
-    if code == 0
-        return "ok"
-    elseif code == 1
-        return "null pointer"
-    elseif code == 2
-        return "panic caught in Rust"
-    elseif code == 3
-        return "invalid UTF-8 input"
-    elseif code == 4
-        return "server already running"
-    elseif code == 5
-        return "server not running"
-    elseif code == 6
-        return "runtime internal error"
-    elseif code == 7
-        return "invalid envelope frame"
-    elseif code == 8
-        return "invalid route"
-    elseif code == 9
-        return "callback failed"
-    else
-        return "unknown error"
-    end
+const _FFI_ERRORS = (
+    "ok",
+    "null pointer",
+    "panic caught in Rust",
+    "invalid UTF-8 input",
+    "server already running",
+    "server not running",
+    "runtime internal error",
+    "invalid envelope frame",
+    "invalid route",
+    "callback failed",
+)
+@inline function _ffi_error_message(code::Integer)
+    i = Int(code) + 1
+    return checkbounds(Bool, _FFI_ERRORS, i) ? _FFI_ERRORS[i] : "unknown error"
 end
 
-function _check_ffi_status(status::Integer, context::AbstractString)
-    status == _ffi_ok && return
+@noinline function _throw_ffi_error(status::Integer, context::AbstractString)
     msg = _ffi_error_message(status)
     error("$(context) failed with status $(status): $(msg)")
 end
 
+@inline function _check_ffi_status(status::Integer, context::AbstractString)
+    status == _ffi_ok || _throw_ffi_error(status, context)
+    return nothing
+end
+
 function _parse_headers(headers_raw::String)
     headers = Dict{String, String}()
+
     isempty(headers_raw) && return headers
 
-    for line in split(headers_raw, "\r\n"; keepempty=false)
-        parts = split(line, ":"; limit=2)
-        length(parts) == 2 || continue
-        headers[strip(parts[1])] = strip(parts[2])
+    for line in eachsplit(headers_raw, "\r\n"; keepempty=false)
+        idx = findfirst(':', line)
+
+        idx === nothing && continue
+
+        key = strip(SubString(line, 1, prevind(line, idx)))
+        val = strip(SubString(line, nextind(line, idx)))
+
+        headers[String(key)] = String(val)
     end
 
     return headers
