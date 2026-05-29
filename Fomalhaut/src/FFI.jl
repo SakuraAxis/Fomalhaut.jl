@@ -178,27 +178,23 @@ function _http_request_trampoline(
 
         handler, path_params = _find_handler_with_params(app, method, path)
         if handler === nothing
-            return Cint(9)
+            err_body, err_len = _malloc_copy(Vector{UInt8}(codeunits("Not Found")))
+            err_ct, err_ct_len = _malloc_copy(Vector{UInt8}(codeunits("text/plain")))
+            unsafe_store!(response_out, FFIHttpResponse(err_body, err_len, err_ct, err_ct_len, UInt16(404)))
+            return Cint(0)
         end
 
         request = Request(method, path, _parse_headers(headers_raw), query, body, path_params)
 
         handler_result = handler(request)
         
-        res_body = UInt8[]
-        res_ct = "text/plain"
-        res_status = UInt16(200)
-
-        if handler_result isa Tuple
-            if length(handler_result) >= 2
-                res_body = handler_result[1]
-                res_ct = handler_result[2]
-                if length(handler_result) >= 3
-                    res_status = handler_result[3]
-                end
-            end
+        res_body, res_ct, res_status = if handler_result isa Tuple
+            b  = length(handler_result) >= 1 ? handler_result[1] : UInt8[]
+            ct = length(handler_result) >= 2 ? handler_result[2] : "text/plain"
+            st = length(handler_result) >= 3 ? handler_result[3] : UInt16(200)
+            b, ct, st
         else
-            res_body = handler_result
+            handler_result, "text/plain", UInt16(200)
         end
 
         # Force deep copy and convert to Vector{UInt8}
@@ -216,7 +212,15 @@ function _http_request_trampoline(
         return Cint(0)
     catch err
         @error "Fomalhaut HTTP handler failed" exception=(err, catch_backtrace())
-        return Cint(9)
+        try
+            err_body, err_len = _malloc_copy(Vector{UInt8}(codeunits("Internal Server Error")))
+            err_ct, err_ct_len = _malloc_copy(Vector{UInt8}(codeunits("text/plain")))
+            unsafe_store!(response_out, FFIHttpResponse(err_body, err_len, err_ct, err_ct_len, UInt16(500)))
+            return Cint(0)
+        catch inner_err
+            @error "Failed to allocate 500 response buffer" exception=inner_err
+            return Cint(9)
+        end
     end
 end
 
