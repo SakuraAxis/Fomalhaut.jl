@@ -29,7 +29,7 @@ pub async fn handle_socket(path: String, stream: TcpStream) {
     };
 
     let mut rx = tx.subscribe();
-    
+
     while rx.changed().await.is_ok() {
         let frame = {
             let b = rx.borrow();
@@ -38,7 +38,7 @@ pub async fn handle_socket(path: String, stream: TcpStream) {
             }
             b.clone()
         };
-        
+
         if socket
             .send(Message::Binary((*frame).clone().into()))
             .await

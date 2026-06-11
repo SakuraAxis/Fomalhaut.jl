@@ -1,7 +1,5 @@
 use std::ffi::c_void;
 
-
-
 use super::callbacks::HttpCallback;
 use super::errors::{FFI_ERR_INVALID_ROUTE, FFI_ERR_PANIC, FFI_ERR_RUNTIME, FFI_OK};
 use crate::runtime::state::{HttpRoute, WsFrame, state};
@@ -44,7 +42,10 @@ pub extern "C" fn fmh_register_http(
             Ok(g) => g,
             Err(_) => return FFI_ERR_RUNTIME,
         };
-        guard.http_routes.insert((method.clone(), path.clone()), HttpRoute { callback, userdata });
+        guard.http_routes.insert(
+            (method.clone(), path.clone()),
+            HttpRoute { callback, userdata },
+        );
         FFI_OK
     });
 
@@ -61,14 +62,7 @@ pub extern "C" fn fmh_register_post(
     callback: HttpCallback,
     userdata: *mut c_void,
 ) -> i32 {
-    fmh_register_http(
-        b"POST".as_ptr(),
-        4,
-        path_ptr,
-        path_len,
-        callback,
-        userdata,
-    )
+    fmh_register_http(b"POST".as_ptr(), 4, path_ptr, path_len, callback, userdata)
 }
 
 #[unsafe(no_mangle)]
@@ -140,7 +134,9 @@ pub extern "C" fn fmh_register_native_route(
             Ok(g) => g,
             Err(_) => return FFI_ERR_RUNTIME,
         };
-        guard.native_routes.insert((method.clone(), path.clone()), entity);
+        guard
+            .native_routes
+            .insert((method.clone(), path.clone()), entity);
         FFI_OK
     });
 

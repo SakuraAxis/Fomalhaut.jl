@@ -12,7 +12,7 @@ pub use ffi::{
 #[cfg(test)]
 mod tests {
     use super::ffi::errors::{FFI_ERR_ALREADY_RUNNING, FFI_ERR_NOT_RUNNING, FFI_OK};
-    use super::protocol::envelope::{validate_envelope, ENVELOPE_HEADER_LEN, ENVELOPE_VERSION_V1};
+    use super::protocol::envelope::{ENVELOPE_HEADER_LEN, ENVELOPE_VERSION_V1, validate_envelope};
     use super::{fmh_register_websocket, fmh_server_start, fmh_server_stop};
 
     fn build_test_frame(payload: &[u8]) -> Vec<u8> {

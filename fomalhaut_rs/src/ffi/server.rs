@@ -4,13 +4,13 @@ use tokio::sync::oneshot;
 
 use super::errors::{
     FFI_ERR_ALREADY_RUNNING, FFI_ERR_INVALID_FRAME, FFI_ERR_INVALID_ROUTE, FFI_ERR_INVALID_UTF8,
-    FFI_ERR_NULL_PTR, FFI_ERR_PANIC, FFI_ERR_RUNTIME, FFI_OK, FFI_ERR_NOT_READY, FFI_OK_WITH_TASK,
+    FFI_ERR_NOT_READY, FFI_ERR_NULL_PTR, FFI_ERR_PANIC, FFI_ERR_RUNTIME, FFI_OK, FFI_OK_WITH_TASK,
 };
+use crate::ffi::callbacks::CallbackResponse;
 use crate::protocol::envelope::validate_envelope;
 use crate::runtime::state::state;
+use crate::runtime::state::{HttpNotifierCb, clear_http_notifier, set_http_notifier};
 use crate::transport;
-use crate::ffi::callbacks::CallbackResponse;
-use crate::runtime::state::{set_http_notifier, clear_http_notifier, HttpNotifierCb};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn fmh_set_allowed_origins(origins_ptr: *const u8, origins_len: usize) -> i32 {
@@ -63,7 +63,8 @@ pub extern "C" fn fmh_db_connect(url_ptr: *const u8, url_len: usize) -> i32 {
             Err(_) => return FFI_ERR_INVALID_UTF8,
         };
 
-        let (tx, rx) = std::sync::mpsc::channel::<Result<sea_orm::DatabaseConnection, sea_orm::DbErr>>();
+        let (tx, rx) =
+            std::sync::mpsc::channel::<Result<sea_orm::DatabaseConnection, sea_orm::DbErr>>();
 
         let url_for_log = url.clone();
 
@@ -131,7 +132,8 @@ pub extern "C" fn fmh_server_start(addr_ptr: *const u8, addr_len: usize) -> i32 
         }
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-        let (http_task_tx, http_task_rx) = tokio::sync::mpsc::channel::<crate::ffi::callbacks::HttpTask>(64);
+        let (http_task_tx, http_task_rx) =
+            tokio::sync::mpsc::channel::<crate::ffi::callbacks::HttpTask>(64);
         crate::runtime::state::set_http_task_rx(http_task_rx);
         let worker_addr = addr.clone();
 
@@ -153,7 +155,7 @@ pub extern "C" fn fmh_server_start(addr_ptr: *const u8, addr_len: usize) -> i32 
                     return;
                 }
             };
-        
+
             rt.block_on(async move {
                 let listener = match tokio::net::TcpListener::bind(&worker_addr).await {
                     Ok(l) => {
@@ -165,7 +167,7 @@ pub extern "C" fn fmh_server_start(addr_ptr: *const u8, addr_len: usize) -> i32 
                         return;
                     }
                 };
-        
+
                 transport::http_server::run_with_listener(listener, shutdown_rx).await;
             });
         });
@@ -173,10 +175,13 @@ pub extern "C" fn fmh_server_start(addr_ptr: *const u8, addr_len: usize) -> i32 
         // Wait for bind success or failure ( short timeout if needed, but recv is fine )
         match rx.recv() {
             Ok(Ok(_)) => {
-                println!("☄️ ||||||  Started server process on http://{}  |||||| ☄️", addr);
+                println!(
+                    "☄️ ||||||  Started server process on http://{}  |||||| ☄️",
+                    addr
+                );
 
                 FFI_OK
-            },
+            }
             Ok(Err(err)) => {
                 eprintln!("Server start error: {}", err);
                 // Clear shutdown_tx if bind failed
@@ -286,16 +291,14 @@ pub extern "C" fn fmh_set_http_notifier(
     cb: Option<HttpNotifierCb>,
     handle: *mut std::ffi::c_void,
 ) -> i32 {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        match cb {
-            Some(f) => {
-                set_http_notifier(f, handle);
-                FFI_OK
-            }
-            None => {
-                clear_http_notifier();
-                FFI_OK
-            }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match cb {
+        Some(f) => {
+            set_http_notifier(f, handle);
+            FFI_OK
+        }
+        None => {
+            clear_http_notifier();
+            FFI_OK
         }
     }));
     match result {
@@ -305,9 +308,7 @@ pub extern "C" fn fmh_set_http_notifier(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn fmh_poll_http_task(
-    data_out: *mut crate::ffi::callbacks::FfiHttpTaskData,
-) -> i32 {
+pub extern "C" fn fmh_poll_http_task(data_out: *mut crate::ffi::callbacks::FfiHttpTaskData) -> i32 {
     if data_out.is_null() {
         return FFI_ERR_NULL_PTR;
     }
@@ -379,7 +380,8 @@ pub extern "C" fn fmh_complete_http_task(
         let content_type = if content_type_len == 0 || content_type_ptr.is_null() {
             "text/plain".to_string()
         } else {
-            let bytes = unsafe { std::slice::from_raw_parts(content_type_ptr, content_type_len).to_vec() };
+            let bytes =
+                unsafe { std::slice::from_raw_parts(content_type_ptr, content_type_len).to_vec() };
             unsafe { libc::free(content_type_ptr.cast()) };
             String::from_utf8(bytes).unwrap_or_else(|_| "text/plain".to_string())
         };

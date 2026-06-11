@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, RwLock, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-use tokio::sync::{oneshot, watch, mpsc};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::ffi::callbacks::HttpCallback;
 use crate::ffi::callbacks::HttpTask;

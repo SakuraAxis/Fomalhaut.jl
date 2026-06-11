@@ -1,21 +1,22 @@
 //! Manually Validated by zzztzzzt-SakuraAxis 2026-05-26
 
-use sea_orm::{ConnectionTrait, DatabaseConnection, Statement, Value, FromQueryResult};
-use serde_json::{json, Value as JsonValue};
+use sea_orm::{ConnectionTrait, DatabaseConnection, FromQueryResult, Statement, Value};
+use serde_json::{Value as JsonValue, json};
 
 fn validate_identifier(name: &str) -> Result<&str, String> {
     if name.is_empty() {
         return Err("Identifier cannot be empty".to_string());
     }
-    
-    let has_invalid = name.as_bytes().iter().any(|&b| {
-        !b.is_ascii_alphanumeric() && b != b'_'
-    });
+
+    let has_invalid = name
+        .as_bytes()
+        .iter()
+        .any(|&b| !b.is_ascii_alphanumeric() && b != b'_');
 
     if has_invalid {
         return Err(format!("Invalid identifier '{}'", name));
     }
-    
+
     Ok(name)
 }
 
@@ -41,7 +42,7 @@ pub async fn handle_native_request(
                     format!("SELECT * FROM {} WHERE id = ?", table_name),
                     [Value::String(Some(id_val))],
                 );
-                
+
                 let query_res = db.query_one_raw(stmt).await.map_err(|e| e.to_string())?;
 
                 if let Some(row) = query_res {
@@ -51,14 +52,21 @@ pub async fn handle_native_request(
                     Err("Resource Not Found".to_string())
                 }
             } else {
-                let limit = extract_query_param(query, "limit").and_then(|s| s.parse::<u64>().ok()).unwrap_or(100);
-                let offset = extract_query_param(query, "offset").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                
+                let limit = extract_query_param(query, "limit")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(100);
+                let offset = extract_query_param(query, "offset")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+
                 let safe_limit = std::cmp::min(limit, 10000);
 
                 let stmt = Statement::from_string(
                     backend,
-                    format!("SELECT * FROM {} LIMIT {} OFFSET {}", table_name, safe_limit, offset),
+                    format!(
+                        "SELECT * FROM {} LIMIT {} OFFSET {}",
+                        table_name, safe_limit, offset
+                    ),
                 );
                 let query_res = db.query_all_raw(stmt).await.map_err(|e| e.to_string())?;
 
@@ -85,7 +93,9 @@ pub async fn handle_native_request(
 
         "POST" => {
             let json_body: JsonValue = serde_json::from_slice(body).map_err(|e| e.to_string())?;
-            let obj = json_body.as_object().ok_or("Request body must be a JSON object")?;
+            let obj = json_body
+                .as_object()
+                .ok_or("Request body must be a JSON object")?;
 
             if obj.is_empty() {
                 return Err("Request body cannot be empty".to_string());
@@ -118,7 +128,9 @@ pub async fn handle_native_request(
         "PUT" | "PATCH" => {
             let id = extract_id(path).ok_or_else(|| "Resource ID required".to_string())?;
             let json_body: JsonValue = serde_json::from_slice(body).map_err(|e| e.to_string())?;
-            let obj = json_body.as_object().ok_or("Request body must be a JSON object")?;
+            let obj = json_body
+                .as_object()
+                .ok_or("Request body must be a JSON object")?;
 
             if obj.is_empty() {
                 return Err("Request body cannot be empty".to_string());
@@ -147,7 +159,10 @@ pub async fn handle_native_request(
             Ok(json!({ "status": "success", "action": "updated" }).to_string())
         }
 
-        _ => Err(format!("HTTP method {} not implemented for native engine", method)),
+        _ => Err(format!(
+            "HTTP method {} not implemented for native engine",
+            method
+        )),
     }
 }
 
@@ -167,18 +182,17 @@ fn extract_query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 
 /// Dynamic Row -> JSON conversion
 fn row_to_json(row: sea_orm::QueryResult) -> Result<JsonValue, String> {
-    let json_value = JsonValue::from_query_result(&row, "")
-        .map_err(|e| e.to_string())?;
-        
+    let json_value = JsonValue::from_query_result(&row, "").map_err(|e| e.to_string())?;
+
     Ok(json_value)
 }
 
 fn json_to_value(v: JsonValue) -> Value {
     match v {
         JsonValue::Null => Value::String(None),
-        
+
         JsonValue::Bool(b) => Value::Bool(Some(b)),
-        
+
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Value::BigInt(Some(i))
@@ -188,9 +202,9 @@ fn json_to_value(v: JsonValue) -> Value {
                 Value::String(None)
             }
         }
-        
+
         JsonValue::String(s) => Value::String(Some(s)),
-        
+
         JsonValue::Array(_) | JsonValue::Object(_) => Value::Json(Some(Box::new(v))),
     }
 }

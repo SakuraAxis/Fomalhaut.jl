@@ -23,7 +23,10 @@ pub async fn run_until_shutdown(addr: &str, shutdown_rx: tokio::sync::oneshot::R
     run_with_listener(listener, shutdown_rx).await;
 }
 
-pub async fn run_with_listener(listener: tokio::net::TcpListener, mut shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
+pub async fn run_with_listener(
+    listener: tokio::net::TcpListener,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+) {
     loop {
         tokio::select! {
             _ = &mut shutdown_rx => {
@@ -49,8 +52,10 @@ pub async fn run_with_listener(listener: tokio::net::TcpListener, mut shutdown_r
 async fn handle_connection(stream: TcpStream) -> io::Result<()> {
     match tokio::time::timeout(
         std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
-        handle_connection_inner(stream)
-    ).await {
+        handle_connection_inner(stream),
+    )
+    .await
+    {
         Ok(result) => result,
         Err(_) => Ok(()),
     }
@@ -60,7 +65,16 @@ async fn handle_connection_inner(mut stream: TcpStream) -> io::Result<()> {
     let request_head = match peek_request_head(&stream).await {
         Ok(Some(head)) => head,
         Ok(None) => {
-            write_response(&mut stream, 400, "text/plain", b"Bad Request", None, None, None).await?;
+            write_response(
+                &mut stream,
+                400,
+                "text/plain",
+                b"Bad Request",
+                None,
+                None,
+                None,
+            )
+            .await?;
             return Ok(());
         }
         Err(e) => {
@@ -131,7 +145,7 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
     let mut stream = request.stream;
 
     let method_upper = request.method.as_str();
-    
+
     let mut normalized_path = request.path.clone();
     if normalized_path.len() > 1 && normalized_path.ends_with('/') {
         normalized_path.pop();
@@ -145,12 +159,18 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
         let route_key = (method_upper.to_string(), normalized_path.clone());
 
         if let Some(route) = guard.http_routes.get(&route_key) {
-            (RouteResolution::Handler(*route), Some(normalized_path.clone()))
+            (
+                RouteResolution::Handler(*route),
+                Some(normalized_path.clone()),
+            )
         } else if let Some(entity) = guard.native_routes.get(&route_key) {
-            (RouteResolution::Native(entity.clone()), Some(normalized_path.clone()))
+            (
+                RouteResolution::Native(entity.clone()),
+                Some(normalized_path.clone()),
+            )
         } else {
             let mut found = None;
-            
+
             for ((m, p), entity) in &guard.native_routes {
                 if m == method_upper && match_dynamic_path(p, &normalized_path) {
                     found = Some((RouteResolution::Native(entity.clone()), Some(p.clone())));
@@ -170,14 +190,30 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
             if let Some(res) = found {
                 res
             } else {
-                let exists_on_other_method = guard.http_routes.keys()
+                let exists_on_other_method = guard
+                    .http_routes
+                    .keys()
                     .chain(guard.native_routes.keys())
                     .any(|(_, p)| p == &normalized_path || match_dynamic_path(p, &normalized_path));
 
                 if exists_on_other_method {
-                    (RouteResolution::Immediate(405, r#"{"error":"Method Not Allowed"}"#.to_string(), "application/json"), None)
+                    (
+                        RouteResolution::Immediate(
+                            405,
+                            r#"{"error":"Method Not Allowed"}"#.to_string(),
+                            "application/json",
+                        ),
+                        None,
+                    )
                 } else {
-                    (RouteResolution::Immediate(404, r#"{"error":"Not Found"}"#.to_string(), "application/json"), None)
+                    (
+                        RouteResolution::Immediate(
+                            404,
+                            r#"{"error":"Not Found"}"#.to_string(),
+                            "application/json",
+                        ),
+                        None,
+                    )
                 }
             }
         }
@@ -197,51 +233,156 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
             let query_bytes = request.query.as_bytes().to_vec();
             let header_bytes = serialize_headers(&request.headers);
 
-            let callback_result = invoke_via_channel(route, method_bytes, path_bytes, query_bytes, header_bytes, body).await
+            let callback_result = invoke_via_channel(
+                route,
+                method_bytes,
+                path_bytes,
+                query_bytes,
+                header_bytes,
+                body,
+            )
+            .await
             .map_err(|_| io::Error::other("Callback task failed"))?;
 
             return match callback_result {
                 Ok(response) => {
-                    write_response(&mut stream, response.status_code, &response.content_type, &response.body, origin, allow_methods.as_deref(), allow_headers).await
+                    write_response(
+                        &mut stream,
+                        response.status_code,
+                        &response.content_type,
+                        &response.body,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await
                 }
                 Err(_) => {
-                    write_response(&mut stream, 500, "application/json", br#"{"error":"Handler failed"}"#, origin, allow_methods.as_deref(), allow_headers).await
+                    write_response(
+                        &mut stream,
+                        500,
+                        "application/json",
+                        br#"{"error":"Handler failed"}"#,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await
                 }
             };
         }
 
         if allow_methods.is_none() {
-            return write_response(&mut stream, 404, "application/json", br#"{"error":"Not Found"}"#, origin, None, allow_headers).await;
+            return write_response(
+                &mut stream,
+                404,
+                "application/json",
+                br#"{"error":"Not Found"}"#,
+                origin,
+                None,
+                allow_headers,
+            )
+            .await;
         }
 
-        return write_response(&mut stream, 204, "text/plain", b"", origin, allow_methods.as_deref(), allow_headers).await;
+        return write_response(
+            &mut stream,
+            204,
+            "text/plain",
+            b"",
+            origin,
+            allow_methods.as_deref(),
+            allow_headers,
+        )
+        .await;
     }
 
     if request.method == "GET" && request.path == "/" {
-        return write_response(&mut stream, 200, "application/json", br#"{"status":"running","engine":"Fomalhaut"}"#, origin, Some("GET, OPTIONS"), allow_headers).await;
+        return write_response(
+            &mut stream,
+            200,
+            "application/json",
+            br#"{"status":"running","engine":"Fomalhaut"}"#,
+            origin,
+            Some("GET, OPTIONS"),
+            allow_headers,
+        )
+        .await;
     }
 
     match resolution {
         RouteResolution::Immediate(status, message, content_type) => {
-            write_response(&mut stream, status, content_type, message.as_bytes(), origin, allow_methods.as_deref(), allow_headers).await?;
+            write_response(
+                &mut stream,
+                status,
+                content_type,
+                message.as_bytes(),
+                origin,
+                allow_methods.as_deref(),
+                allow_headers,
+            )
+            .await?;
         }
         RouteResolution::Native(entity) => {
-            let db = state().read().map_err(|_| io::Error::other("Runtime lock failed"))?.db.clone();
+            let db = state()
+                .read()
+                .map_err(|_| io::Error::other("Runtime lock failed"))?
+                .db
+                .clone();
 
             match db {
                 Some(conn) => {
-                    match crate::database::handlers::handle_native_request(&entity, &conn, &request.method, &request.path, &request.query, &request.body).await {
+                    match crate::database::handlers::handle_native_request(
+                        &entity,
+                        &conn,
+                        &request.method,
+                        &request.path,
+                        &request.query,
+                        &request.body,
+                    )
+                    .await
+                    {
                         Ok(json_res) => {
-                            write_response(&mut stream, 200, "application/json", json_res.as_bytes(), origin, allow_methods.as_deref(), allow_headers).await?;
+                            write_response(
+                                &mut stream,
+                                200,
+                                "application/json",
+                                json_res.as_bytes(),
+                                origin,
+                                allow_methods.as_deref(),
+                                allow_headers,
+                            )
+                            .await?;
                         }
                         Err(err) => {
-                            let err_msg = format!(r#"{{"error":"Native handler failed","details":"{}"}}"#, err);
-                            write_response(&mut stream, 500, "application/json", err_msg.as_bytes(), origin, allow_methods.as_deref(), allow_headers).await?;
+                            let err_msg = format!(
+                                r#"{{"error":"Native handler failed","details":"{}"}}"#,
+                                err
+                            );
+                            write_response(
+                                &mut stream,
+                                500,
+                                "application/json",
+                                err_msg.as_bytes(),
+                                origin,
+                                allow_methods.as_deref(),
+                                allow_headers,
+                            )
+                            .await?;
                         }
                     }
                 }
                 None => {
-                    write_response(&mut stream, 503, "application/json", br#"{"error":"Database not connected","info":"..."}"#, origin, allow_methods.as_deref(), allow_headers).await?;
+                    write_response(
+                        &mut stream,
+                        503,
+                        "application/json",
+                        br#"{"error":"Database not connected","info":"..."}"#,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await?;
                 }
             }
         }
@@ -252,15 +393,41 @@ async fn handle_http_request(request: ParsedRequest) -> io::Result<()> {
             let query_bytes = request.query.as_bytes().to_vec();
             let header_bytes = serialize_headers(&request.headers);
 
-            let callback_result = invoke_via_channel(route, method_bytes, path_bytes, query_bytes, header_bytes, body).await
+            let callback_result = invoke_via_channel(
+                route,
+                method_bytes,
+                path_bytes,
+                query_bytes,
+                header_bytes,
+                body,
+            )
+            .await
             .map_err(|_| io::Error::other("Callback task failed"))?;
 
             match callback_result {
                 Ok(response) => {
-                    write_response(&mut stream, response.status_code, &response.content_type, &response.body, origin, allow_methods.as_deref(), allow_headers).await?;
+                    write_response(
+                        &mut stream,
+                        response.status_code,
+                        &response.content_type,
+                        &response.body,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await?;
                 }
                 Err(_) => {
-                    write_response(&mut stream, 500, "application/json", br#"{"error":"Handler failed"}"#, origin, allow_methods.as_deref(), allow_headers).await?;
+                    write_response(
+                        &mut stream,
+                        500,
+                        "application/json",
+                        br#"{"error":"Handler failed"}"#,
+                        origin,
+                        allow_methods.as_deref(),
+                        allow_headers,
+                    )
+                    .await?;
                 }
             }
         }
@@ -288,7 +455,7 @@ async fn peek_request_head(stream: &TcpStream) -> io::Result<Option<RequestHead>
 async fn read_http_request(stream: TcpStream) -> io::Result<ParsedRequest> {
     tokio::time::timeout(
         std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
-        read_http_request_inner(stream)
+        read_http_request_inner(stream),
     )
     .await
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Request read timeout"))?
@@ -296,25 +463,31 @@ async fn read_http_request(stream: TcpStream) -> io::Result<ParsedRequest> {
 
 async fn read_http_request_inner(mut stream: TcpStream) -> io::Result<ParsedRequest> {
     // Pre-allocated buffer capacity
-    let mut buffer = Vec::with_capacity(8192); 
+    let mut buffer = Vec::with_capacity(8192);
     let headers_end;
 
     loop {
         if buffer.len() >= HEADER_READ_LIMIT {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Request headers too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Request headers too large",
+            ));
         }
 
         let current_len = buffer.len();
-        
+
         // Ensure sufficient extra space is reserved for this read ( maximum 4KB per read )
         buffer.resize(current_len + 4096, 0_u8);
-        
+
         let read = stream.read(&mut buffer[current_len..]).await?;
-        
+
         if read == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Request ended before headers completed"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Request ended before headers completed",
+            ));
         }
-        
+
         // Correct the actual length of the buffer and cut off any unread spaces
         buffer.truncate(current_len + read);
 
@@ -331,13 +504,16 @@ async fn read_http_request_inner(mut stream: TcpStream) -> io::Result<ParsedRequ
 
     let head = parse_request_head(&buffer[..headers_end])
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid request head"))?;
-    
+
     if let Some(te) = head.headers.get("transfer-encoding") {
         if te
             .split(',')
             .any(|v| v.trim().eq_ignore_ascii_case("chunked"))
         {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "chunked transfer-encoding not supported"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "chunked transfer-encoding not supported",
+            ));
         }
     }
 
@@ -348,12 +524,15 @@ async fn read_http_request_inner(mut stream: TcpStream) -> io::Result<ParsedRequ
         .unwrap_or(0);
 
     if content_length > BODY_READ_LIMIT {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Request body too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Request body too large",
+        ));
     }
 
     // Phase Two : Reading the Body
     let expected_len = headers_end + content_length;
-    
+
     // Precisely expand the buffer to the required maximum capacity in one go
     // This way, regardless of whether the Body is 10KB or 10MB, the underlying memory configuration will only be triggered once
     if buffer.len() < expected_len {
@@ -363,11 +542,14 @@ async fn read_http_request_inner(mut stream: TcpStream) -> io::Result<ParsedRequ
     while buffer.len() < expected_len {
         let current_len = buffer.len();
         let to_read = (expected_len - current_len).min(16384);
-        
+
         buffer.resize(current_len + to_read, 0_u8);
         let read = stream.read(&mut buffer[current_len..]).await?;
         if read == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Request ended before body completed"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Request ended before body completed",
+            ));
         }
         buffer.truncate(current_len + read);
     }
@@ -498,10 +680,10 @@ async fn write_response(
 ) -> io::Result<()> {
     let status_text = reason_phrase(status_code);
     let allow_origin = resolve_allow_origin(origin)?;
-    
+
     let mut header = Vec::with_capacity(512);
     use std::io::Write as _;
-    
+
     write!(
         &mut header,
         "HTTP/1.1 {} {}\r\n\
@@ -554,7 +736,11 @@ fn resolve_allow_origin(origin: Option<&str>) -> io::Result<Option<String>> {
         return Ok(None);
     };
 
-    if guard.allowed_origins.iter().any(|allowed| allowed == origin) {
+    if guard
+        .allowed_origins
+        .iter()
+        .any(|allowed| allowed == origin)
+    {
         Ok(Some(origin.to_string()))
     } else {
         Ok(None)
@@ -590,9 +776,7 @@ fn allowed_methods_for_path(path: &str) -> io::Result<Option<String>> {
             .http_routes
             .keys()
             .chain(guard.native_routes.keys())
-            .filter(|(_, route_path)| {
-                route_path == path || match_dynamic_path(route_path, path)
-            })
+            .filter(|(_, route_path)| route_path == path || match_dynamic_path(route_path, path))
             .map(|(method, _)| method.clone())
             .collect()
     };

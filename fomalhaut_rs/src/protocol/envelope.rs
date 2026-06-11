@@ -29,14 +29,16 @@ impl EnvelopeHeader {
             content_type: u16::from_le_bytes(
                 frame[CONTENT_TYPE_OFFSET..FLAGS_OFFSET].try_into().ok()?,
             ),
-            flags: u16::from_le_bytes(
-                frame[FLAGS_OFFSET..TIMESTAMP_NS_OFFSET].try_into().ok()?,
-            ),
+            flags: u16::from_le_bytes(frame[FLAGS_OFFSET..TIMESTAMP_NS_OFFSET].try_into().ok()?),
             timestamp_ns: u64::from_le_bytes(
-                frame[TIMESTAMP_NS_OFFSET..PAYLOAD_LEN_OFFSET].try_into().ok()?,
+                frame[TIMESTAMP_NS_OFFSET..PAYLOAD_LEN_OFFSET]
+                    .try_into()
+                    .ok()?,
             ),
             payload_len: u32::from_le_bytes(
-                frame[PAYLOAD_LEN_OFFSET..ENVELOPE_HEADER_LEN].try_into().ok()?,
+                frame[PAYLOAD_LEN_OFFSET..ENVELOPE_HEADER_LEN]
+                    .try_into()
+                    .ok()?,
             ),
         })
     }
