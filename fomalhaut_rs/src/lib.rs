@@ -5,7 +5,7 @@ pub mod runtime;
 pub mod transport;
 
 pub use ffi::{
-    FfiHttpResponse, HttpCallback, fmh_register_http, fmh_register_post, fmh_register_websocket,
+    FfiHttpResponse, HttpCallback, NativeWsCallback, fmh_register_http, fmh_register_post, fmh_register_websocket,fmh_register_axis_ws_stream,
     fmh_server_start, fmh_server_stop, fmh_set_allowed_origins, fmh_ws_broadcast,
 };
 

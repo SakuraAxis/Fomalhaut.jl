@@ -53,6 +53,7 @@ mutable struct App
     http_route_param_types::Dict{Tuple{String, String}, Dict{String, DataType}}
     http_route_query_params::Dict{Tuple{String, String}, Vector{QueryParamSpec}}
     ws_routes::Dict{String, Function}
+    axis_ws_routes::Dict{String, Tuple{Float64, Ptr{Cvoid}, Ptr{Cvoid}}}
     native_routes::Dict{Tuple{String, String}, String}
     native_route_param_types::Dict{Tuple{String, String}, Dict{String, DataType}}
     handler_refs::Vector{Any}
@@ -67,6 +68,7 @@ function App()
         Dict{Tuple{String, String}, Dict{String, DataType}}(),
         Dict{Tuple{String, String}, Vector{QueryParamSpec}}(),
         Dict{String, Function}(),
+        Dict{String, Tuple{Float64, Ptr{Cvoid}, Ptr{Cvoid}}}(),
         Dict{Tuple{String, String}, String}(),
         Dict{Tuple{String, String}, Dict{String, DataType}}(),
         Any[],

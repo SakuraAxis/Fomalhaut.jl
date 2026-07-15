@@ -4,6 +4,24 @@ use crate::runtime::state::HttpRoute;
 
 pub type HttpCallback = Option<unsafe extern "C" fn(*mut std::ffi::c_void)>;
 
+/// C-compatible callback for native Axis WebSocket frame generation.
+///
+/// Invoked by `fomalhaut_rs` per frame from a dedicated OS thread.
+///
+/// # Safety
+/// The returned pointer must remain valid and immutable until the next invocation.
+/// The caller ( `fomalhaut_rs` ) copies the payload immediately and does not take ownership.
+///
+/// # Parameters
+/// * `userdata` - User-provided context pointer registered with the callback.
+/// * `out_len`  - Output parameter populated with the payload size in bytes.
+///
+/// # Returns
+/// A pointer to the raw payload ( e.g., GPU readback buffer ). 
+/// Returns `null` or writes `0` to `out_len` to skip the current frame.
+pub type NativeWsCallback =
+    unsafe extern "C" fn(userdata: *mut std::ffi::c_void, out_len: *mut usize) -> *const u8;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FfiHttpResponse {

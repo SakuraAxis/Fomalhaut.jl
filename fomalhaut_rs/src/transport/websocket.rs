@@ -3,13 +3,22 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-use crate::runtime::state::state;
+use crate::runtime::state::{WsSender, state};
 
 pub fn route_exists(path: &str) -> bool {
     match state().read() {
-        Ok(guard) => guard.ws_routes.contains_key(path),
+        Ok(guard) => guard.ws_routes.contains_key(path) || guard.axis_ws_routes.contains_key(path),
         Err(_) => false,
     }
+}
+
+fn resolve_sender(path: &str) -> Option<WsSender> {
+    let guard = state().read().ok()?;
+    guard
+        .ws_routes
+        .get(path)
+        .or_else(|| guard.axis_ws_routes.get(path))
+        .cloned()
 }
 
 pub async fn handle_socket(path: String, stream: TcpStream) {
@@ -17,15 +26,9 @@ pub async fn handle_socket(path: String, stream: TcpStream) {
         return;
     };
 
-    let tx = {
-        let guard = match state().read() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        match guard.ws_routes.get(&path) {
-            Some(tx) => tx.clone(),
-            None => return,
-        }
+    let tx = match resolve_sender(&path) {
+        Some(tx) => tx,
+        None => return,
     };
 
     let mut rx = tx.subscribe();

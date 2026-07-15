@@ -206,6 +206,81 @@ macro websocket(app, path, f)
     end)
 end
 
+"""
+    register_axis_websocket!(app, path, fps, callback_ptr, ctx_ptr=C_NULL)
+
+Register a native Axis WebSocket stream on `path`.
+
+`callback_ptr` must be a `Ptr{Cvoid}` obtained from `@cfunction` pointing to
+a function with the C signature :
+
+    (userdata::Ptr{Cvoid}, out_len::Ptr{Csize_t}) -> Ptr{UInt8}
+
+The function is called once per frame by a dedicated Rust OS thread at `fps`
+frames per second. It must :
+  - Write the byte-length of the payload into `*out_len`.
+  - Return a pointer to the raw payload bytes ( e.g. a pre-allocated GPU
+    readback buffer declared as `const` in an `@AX.rust_fn` ).
+  - Keep the returned pointer valid until the next invocation.
+
+Julia is **never woken up** during the hot-path; no GC pressure is incurred.
+"""
+function register_axis_websocket!(
+    app::App,
+    path::AbstractString,
+    fps::Real,
+    callback_ptr::Ptr{Cvoid},
+    ctx_ptr::Ptr{Cvoid} = C_NULL,
+)
+    fps > 0 || error("fps must be > 0")
+    callback_ptr != C_NULL || error("callback_ptr must not be C_NULL")
+    validated = String(_validate_path(path))
+    app.axis_ws_routes[validated] = (Float64(fps), callback_ptr, ctx_ptr)
+    return app
+end
+
+"""
+    @axis_websocket app path fps callback_ptr [ctx_ptr]
+
+Register a Zero-Julia-VM native Axis WebSocket stream.
+
+`callback_ptr` is a `Ptr{Cvoid}` produced by `@cfunction` wrapping an
+`@AX.rust_fn`-generated stub.  `ctx_ptr` is an optional opaque context
+pointer passed to the callback on every frame ( default : `C_NULL` ).
+
+# Example
+```julia
+import Fomalhaut as FMHUT
+import Axis as AX
+
+# Declare the per-frame generator in Rust
+@rust_fn function generate_frame(ctx::Ptr{Cvoid}, out_len::Ptr{Csize_t})::Ptr{UInt8}
+    \"\"\"
+    // GPU dispatch & readback 
+    \"\"\"
+end
+
+app = FMHUT.App()
+
+# Pin a C-callable wrapper
+const FRAME_CB = @cfunction(
+    generate_frame, 
+    Ptr{UInt8}, 
+    (Ptr{Cvoid}, Ptr{Csize_t})
+)
+
+@FMHUT.axis_websocket app "/live" 60.0 FRAME_CB
+
+FMHUT.serve(app; port=8080)
+```
+"""
+macro axis_websocket(app, path, fps, callback_ptr, ctx_ptr = :(C_NULL))
+    return esc(quote
+        $(@__MODULE__).register_axis_websocket!($app, $path, $fps, $callback_ptr, $ctx_ptr)
+    end)
+end
+
+
 # SeaORM Specialized Macros
 macro sea_get(app, path, entity)
     return esc(quote

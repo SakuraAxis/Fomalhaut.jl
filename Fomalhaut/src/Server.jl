@@ -64,6 +64,25 @@ function _register_routes!(app::App)
         )
         _check_ffi_status(status, "register_websocket $path")
     end
+
+    _register_axis_ws_routes!(app)
+end
+
+function _register_axis_ws_routes!(app::App)
+    for (path, (fps, callback_ptr, ctx_ptr)) in app.axis_ws_routes
+        path_bytes = Vector{UInt8}(codeunits(path))
+        status = ccall(
+            (:fmh_register_axis_ws_stream, _load_rust_lib()),
+            Cint,
+            (Ptr{UInt8}, Csize_t, Float64, Ptr{Cvoid}, Ptr{Cvoid}),
+            path_bytes,
+            length(path_bytes),
+            fps,
+            callback_ptr,
+            ctx_ptr,
+        )
+        _check_ffi_status(status, "register_axis_ws_stream $path")
+    end
 end
 
 function broadcast_frame!(
@@ -279,7 +298,7 @@ function serve(
     end
 
     1 <= port <= 65535 || error("port must be in 1:65535")
-    (isempty(app.http_routes) && isempty(app.ws_routes) && isempty(app.native_routes)) && error("No routes registered on this App.")
+    (isempty(app.http_routes) && isempty(app.ws_routes) && isempty(app.native_routes) && isempty(app.axis_ws_routes)) && error("No routes registered on this App.")
     !_server_running[] || error("A Fomalhaut server is already running")
 
     addr = "$(host):$(port)"

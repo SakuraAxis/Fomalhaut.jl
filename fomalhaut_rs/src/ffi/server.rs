@@ -218,6 +218,7 @@ pub extern "C" fn fmh_server_stop() -> i32 {
         clear_http_notifier();
         guard.http_routes.clear();
         guard.ws_routes.clear();
+        guard.axis_ws_routes.clear(); // dropping senders signals background threads to exit
         guard.allowed_origins.clear();
 
         FFI_OK

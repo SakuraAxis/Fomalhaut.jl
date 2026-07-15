@@ -143,6 +143,62 @@ println("Fomalhaut Methods Test Server starting on http://127.0.0.1:8080")
 FMHUT.serve(app; port=8080, allowed_origins=["*"])
 ```
 
+## Specialized Native WebSocket ( Axis )
+
+Fomalhaut supports a specialised webSocket that bypass the Julia VM for GPU compute
+workloads using **Axis**.
+
+### **Native WebSocket** Registrations
+
+run below to test `@FMHUT.axis_websocket`:
+
+( Front-end example is in this file too, just copy & paste it to browser console )
+
+`julia --project=. --threads=auto scripts/test_fmhut_axis_websocket.jl`
+
+```julia
+
+```
+
+### Callback Signature
+
+Your generator must be a Rust function (written with `@AX.rust_fn`) that
+satisfies the following C ABI :
+
+```
+(userdata: *mut c_void, out_len: *mut usize) -> *const u8
+```
+
+| Parameter | Role |
+|-----------|------|
+| `userdata` | Opaque context pointer you pass at registration time (`ctx_ptr`). Carry GPU buffer IDs, simulation parameters, etc. |
+| `out_len` | **Output**: write the byte-length of the payload here before returning. |
+| **Return** | Pointer to the raw payload bytes. Must stay valid until the next invocation (use a pre-allocated static/global buffer). Return `null` or set `*out_len = 0` to skip a frame. |
+
+`fomalhaut_rs` copies the bytes immediately, prepends the 17-byte
+Fomalhaut v1 envelope ( with a live timestamp ), and sends the frame.
+**You must never free this pointer between calls.**
+
+### Limitations
+
+| # | Limitation | Reason |
+|---|------------|--------|
+| 1 | **All per-frame logic must live inside `@AX.rust_fn`** | The hot-path loop runs in a Rust OS thread; you cannot interleave Julia code between frames. |
+| 2 | **The payload buffer must be pre-allocated and pinned** | `fomalhaut_rs` holds a raw pointer; Julia's GC must never move or collect the backing memory. Use `const` global arrays or memory allocated on the Rust side. |
+| 3 | **Dynamic parameter updates require shared atomic/Mutex state** | If you need to change simulation parameters at runtime ( e.g. from an HTTP handler ), write them into an atomically-accessible struct and pass its pointer as `ctx_ptr`. Do **not** read Julia globals from inside the Rust callback. |
+| 4 | **Envelope content_type is always `FLOAT32_TENSOR` (0x0001)** | The native stream always tags frames as Float32 tensors. Custom content types require the standard `@FMHUT.websocket` route. |
+| 5 | **FPS is a target, not a guarantee** | The OS thread uses `std::thread::sleep` for pacing; actual throughput depends on GPU readback latency and OS scheduling jitter. |
+| 6 | **One callback per path** | Each path may only have one native generator registered. Re-registration is not supported; restart the server if the callback needs to change. |
+| 7 | **No per-client context** | All connected clients on a path receive the same broadcast frame. Client-specific streaming requires the standard `@FMHUT.websocket` route. |
+
+### Running the Benchmark Test
+
+Run this to see the performance difference between Julia-related-version and Rust-native-version :
+
+```bash
+julia --project=. scripts/benchmark_axis_websocket_vs_julia.jl
+```
+
 ## Specialized Native Routes ( SeaORM )
 
 Fomalhaut supports specialized routes that bypass the Julia VM for maximum data throughput. These routes execute directly in the Rust layer using **SeaORM**.
