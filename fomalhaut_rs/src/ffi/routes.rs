@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::callbacks::{HttpCallback, NativeWsCallback};
-use super::errors::{FFI_ERR_INVALID_ROUTE, FFI_ERR_NULL_PTR, FFI_ERR_PANIC, FFI_ERR_RUNTIME, FFI_OK};
+use super::errors::{
+    FFI_ERR_INVALID_ROUTE, FFI_ERR_NULL_PTR, FFI_ERR_PANIC, FFI_ERR_RUNTIME, FFI_OK,
+};
 use crate::protocol::envelope::{ENVELOPE_HEADER_LEN, ENVELOPE_VERSION_V1};
 use crate::runtime::state::{HttpRoute, WsFrame, state};
 
@@ -209,8 +211,7 @@ pub extern "C" fn fmh_register_axis_ws_stream(
                     let frame_start = std::time::Instant::now();
 
                     let mut payload_len: usize = 0;
-                    let payload_ptr =
-                        unsafe { callback(userdata, &mut payload_len as *mut usize) };
+                    let payload_ptr = unsafe { callback(userdata, &mut payload_len as *mut usize) };
 
                     // Skip this frame if the callback signals "no data".
                     if !payload_ptr.is_null() && payload_len > 0 {
